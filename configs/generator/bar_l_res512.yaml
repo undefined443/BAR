@@ -1,0 +1,78 @@
+experiment:
+  project: bar
+  name: bar_l_res512
+  output_dir: bar_l_res512
+  max_train_examples: 1281167
+  save_every: 50000
+  eval_every: 5000000
+  generate_every: 5000
+  log_every: 50
+  log_grad_norm_every: 1000
+  resume: true
+  tokenizer_checkpoint: assets/tokenizer/bar_sfq_10bits_res512.bin
+
+model:
+  vq_model:
+    codebook_size: 1024
+    token_size: 10
+    vit_dec_patch_size: 16
+  generator:
+    hidden_size: 1280
+    num_hidden_layers: 32
+    num_attention_heads: 16
+    class_label_dropout: 0.1
+    image_seq_len: 1024
+    condition_num_classes: 1000
+    target_codebook_size: 2
+    use_checkpoint: false
+    randomness_anneal_start: 62500
+    randomness_anneal_end: 93750
+    repeat_class_condition: 32
+    dropout: 0.2
+    attn_drop: 0.2
+    guidance_scale: 5.0
+    mbm_head:
+      width: 2048
+      num_layers: 3
+      randomize_temperature: 1.0
+      tokens_allocation: [2, 2, 2, 4]
+
+dataset:
+  params:
+    pretokenization: /path/to/pretokenized_npz
+    train_shards_path_or_url: /path/to/imagenet-train-{000000..000320}.tar
+    eval_shards_path_or_url: /path/to/imagenet-val-{000000..000049}.tar
+    num_workers_per_gpu: 12
+  preprocessing:
+    resize_shorter_edge: 512
+    crop_size: 512
+    random_crop: false
+    random_flip: true
+
+optimizer:
+  name: adamw
+  params:
+    learning_rate: 0.0004
+    beta1: 0.9
+    beta2: 0.96
+    weight_decay: 0.03
+
+lr_scheduler:
+  scheduler: cosine
+  params:
+    learning_rate: ${optimizer.params.learning_rate}
+    warmup_steps: 31250
+    end_lr: 1.0e-05
+
+training:
+  compile_model: true
+  num_generated_images: 10
+  gradient_accumulation_steps: 1
+  per_gpu_batch_size: 32
+  mixed_precision: bf16
+  enable_tf32: true
+  enable_wandb: true
+  use_ema: false
+  seed: 42
+  max_train_steps: 125000
+  max_grad_norm: 1.0
