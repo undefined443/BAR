@@ -3,7 +3,7 @@
 <div align="center">
 
 [![Website](https://img.shields.io/badge/Project-Website-87CEEB)](https://bar-gen.github.io/)&nbsp;&nbsp;
-[![paper](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://github.com/amazon-far/BAR#autoregressive-image-generation-with-masked-bit-modeling)&nbsp;&nbsp;
+[![paper](https://img.shields.io/badge/arXiv-Paper-<COLOR>.svg)](https://arxiv.org/abs/2602.09024)&nbsp;&nbsp;
 
 </div>
 
