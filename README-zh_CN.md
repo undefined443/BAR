@@ -1,4 +1,4 @@
-# Autoregressive Image Generation with Masked Bit Modeling
+# 基于掩码比特建模的自回归图像生成
 
 <div align="center">
 
@@ -7,95 +7,98 @@
 
 </div>
 
-## Introduction
+## 简介
 
-Visual generative models have driven remarkable progress across computer vision tasks. A central component of these systems is **visual tokenization**, which compresses high-dimensional pixel inputs into compact latent representations. Depending on quantization strategies, visual tokenization pipelines can be categorized into *discrete* and *continuous* approaches. While continuous tokenizers with diffusion models currently dominate visual generation, we investigate whether this gap is fundamental or merely a consequence of design choices.
+视觉生成模型在计算机视觉任务中取得了显著进展。这些系统的核心组件是**视觉分词（visual tokenization）**，它将高维像素输入压缩为紧凑的潜在表示。根据量化策略的不同，视觉分词流程可分为*离散*和*连续*两种方法。尽管目前连续分词器结合扩散模型在视觉生成领域占据主导地位，但我们研究了这一差距究竟是根本性的，还是仅仅由设计选择造成的。
 
-We introduce **BAR** (*masked **B**it **A**uto**R**egressive modeling*), a strong discrete visual generation framework that challenges the prevailing dominance of continuous pipelines. Our key insight is that the commonly observed inferior performance of discrete tokenizers is largely attributable to their substantially higher compression ratios, which lead to severe information loss.
+我们提出了 **BAR**（_masked **B**it **A**uto**R**egressive modeling，掩码比特自回归建模_），这是一个强大的离散视觉生成框架，挑战了连续流程的主导地位。我们的核心发现是：离散分词器常见的较差表现在很大程度上归因于其显著更高的压缩比，从而导致了严重的信息损失。
 
-### Key Findings
+### 核心发现
 
-**1. Discrete Tokenizers Beat Continuous Tokenizers**
-By scaling the codebook size to match the bit budget of continuous tokenizers, we demonstrate that discrete tokenizers can achieve competitive or superior reconstruction quality.
+**1. 离散分词器优于连续分词器**
+通过扩大码本规模以匹配连续分词器的比特预算，我们证明离散分词器可以达到具有竞争力甚至更优的重建质量。
 
-**2. Discrete Autoregressive Models Beat Diffusion**
-We address the vocabulary scaling problem by replacing the standard linear prediction head with a lightweight **Masked Bit Modeling (MBM)** head. This design enables training with arbitrary codebook sizes while maintaining superior generation quality. BAR achieves state-of-the-art gFID of **0.99** on ImageNet-256, surpassing leading continuous and discrete approaches.
+**2. 离散自回归模型优于扩散模型**
+我们通过将标准线性预测头替换为轻量级的**掩码比特建模（Masked Bit Modeling, MBM）**头来解决词汇量扩展问题。这一设计能够在支持任意码本大小的同时保持优越的生成质量。BAR 在 ImageNet-256 上达到了最先进的 gFID **0.99**，超越了领先的连续和离散方法。
 
-**3. Superior Efficiency**
-BAR offers reduced sampling costs and faster convergence compared to diffusion models. Our efficient variant BAR-B/4 achieves 2.94× speedup over MeanFlow while matching its performance, and BAR-B is 3.68× faster than RAE while achieving same FID (1.13 vs 1.13).
-
-<p align="center">
-  <img src="assets/teaser1.png" alt="Unified Bit Budget Metric" width=90%>
-</p>
-<p align="center">
-<em>By measuring information capacity in bits, we enable direct comparison between discrete and continuous tokenizers. Our discrete tokenizer (BAR-FSQ) scales smoothly with codebook size and matches or surpasses continuous tokenizers at sufficient bit budgets.</em>
-</p>
+**3. 更高的效率**
+与扩散模型相比，BAR 具有更低的采样成本和更快的收敛速度。我们的高效变体 BAR-B/4 比 MeanFlow 快 2.94 倍且性能相当；BAR-B 比 RAE 快 3.68 倍且达到相同的 FID（1.13 vs 1.13）。
 
 <p align="center">
-  <img src="assets/teaser2.png" alt="Performance and Efficiency" width=90%>
+  <img src="assets/teaser1.png" alt="统一比特预算度量" width=90%>
 </p>
 <p align="center">
-<em>BAR establishes a new state of the art across both discrete and continuous paradigms. With only 415M parameters, BAR-B achieves gFID of 1.13, matching RAE while being significantly faster. BAR-L (1.1B parameters) achieves a record gFID of 0.99.</em>
+<em>通过以比特为单位衡量信息容量，我们实现了离散分词器和连续分词器之间的直接比较。我们的离散分词器（BAR-FSQ）随码本大小平滑扩展，并在足够的比特预算下匹配或超越连续分词器。</em>
 </p>
 
-## Method Overview
+<p align="center">
+  <img src="assets/teaser2.png" alt="性能与效率" width=90%>
+</p>
+<p align="center">
+<em>BAR 在离散和连续两种范式中均建立了新的最先进水平。仅凭 4.15 亿参数，BAR-B 达到了 1.13 的 gFID，与 RAE 持平且速度显著更快。BAR-L（11 亿参数）达到了 0.99 的创纪录 gFID。</em>
+</p>
 
-### BAR Framework
+## 方法概述
 
-BAR decomposes autoregressive visual generation into two stages:
+### BAR 框架
 
-1. **Context Modeling**: An autoregressive transformer captures global structure via causal attention, generating latent conditions for each token position.
+BAR 将自回归视觉生成分解为两个阶段：
 
-2. **Token Prediction**: Instead of a standard linear head that scales poorly with large vocabularies, we introduce a **Masked Bit Modeling (MBM)** head that generates discrete tokens through progressive bit-wise unmasking.
+1. **上下文建模**：自回归 Transformer 通过因果注意力捕获全局结构，为每个 token 位置生成潜在条件。
 
-### Masked Bit Modeling Head
+2. **Token 预测**：我们引入了**掩码比特建模（MBM）**头来替代在大词汇量下扩展性差的标准线性头，通过渐进式逐比特解码来生成离散 token。
 
-The MBM head treats token prediction as a conditional generation task rather than massive classification:
-- **Scalability**: Memory complexity reduces from O(C) to O(log₂ C), where C is codebook size
-- **Quality**: Bit-wise masking acts as a strong regularizer, consistently improving generation quality
-- **Flexibility**: Supports arbitrary codebook sizes without architectural changes
+### 掩码比特建模头
 
-At inference, the MBM head generates each token via iterative unmasking with a configurable schedule (e.g., [2, 2, 5, 7] unmasks 2, 2, 5, then 7 bits across 4 steps).
+MBM 头将 token 预测视为条件生成任务，而非大规模分类问题：
 
-## Model Zoo
+- **可扩展性**：内存复杂度从 O(C) 降至 O(log₂ C)，其中 C 为码本大小
+- **质量**：逐比特掩码起到强正则化作用，持续提升生成质量
+- **灵活性**：无需架构改动即可支持任意码本大小
 
-We provide pretrained generator models:
+在推理时，MBM 头通过可配置的调度方案迭代解码每个 token（例如，[2, 2, 5, 7] 表示在 4 个步骤中分别解码 2、2、5、7 个比特）。
 
-| Model | Config | Size | gFID | IS |
-| ------------- | ------------- | ------------- | ------------- | ------------- |
-| BAR-B/4 | [bar_b_patch4.yaml](configs/generator/bar_b_patch4.yaml) | 416M | 2.34 | 274.7 |
-| BAR-B/2 | [bar_b_patch2.yaml](configs/generator/bar_b_patch2.yaml) | 415M | 1.35 | 293.4 |
-| BAR-B | [bar_b.yaml](configs/generator/bar_b.yaml) | 415M | 1.13 | 289.0 |
-| BAR-L | [bar_l.yaml](configs/generator/bar_l.yaml) | 1.1B | 0.99 | 296.9 |
-| BAR-L-res512 | [bar_l_res512.yaml](configs/generator/bar_l_res512.yaml) | 1.1B | 1.09 | 311.1 |
+## 模型库
 
+我们提供预训练的生成器模型：
 
-## Preparation
+| 模型         | 配置文件                                                 | 参数量 | gFID | IS    |
+| ------------ | -------------------------------------------------------- | ------ | ---- | ----- |
+| BAR-B/4      | [bar_b_patch4.yaml](configs/generator/bar_b_patch4.yaml) | 416M   | 2.34 | 274.7 |
+| BAR-B/2      | [bar_b_patch2.yaml](configs/generator/bar_b_patch2.yaml) | 415M   | 1.35 | 293.4 |
+| BAR-B        | [bar_b.yaml](configs/generator/bar_b.yaml)               | 415M   | 1.13 | 289.0 |
+| BAR-L        | [bar_l.yaml](configs/generator/bar_l.yaml)               | 1.1B   | 0.99 | 296.9 |
+| BAR-L-res512 | [bar_l_res512.yaml](configs/generator/bar_l_res512.yaml) | 1.1B   | 1.09 | 311.1 |
 
-### Environment Setup
+## 准备工作
+
+### 环境配置
+
 ```shell
 uv sync && source .venv/bin/activate
 ```
 
-### Checkpoint Setup
+### 检查点配置
 
-**Download Model Checkpoints from HuggingFace:**
+**从 HuggingFace 下载模型检查点：**
+
 ```bash
 hf download FAR-Amazon/BAR-collections \
   --local-dir assets
 ```
 
-This will download all pretrained models (generators, tokenizers, and discriminator weights) to the `assets/` folder.
+这将把所有预训练模型（生成器、分词器和判别器权重）下载到 `assets/` 文件夹。
 
-## Quick Start
+## 快速开始
 
-### Training
+### 训练
 
-**Data Preparation:**
+**数据准备：**
 
-We use webdataset format for data loading. To begin with, it is needed to convert the dataset into webdataset format. An example script to convert ImageNet to wds format is provided [here](https://github.com/bytedance/1d-tokenizer/blob/main/data/convert_imagenet_to_wds.py).
+我们使用 webdataset 格式加载数据。首先需要将数据集转换为 webdataset 格式。[这里](https://github.com/bytedance/1d-tokenizer/blob/main/data/convert_imagenet_to_wds.py)提供了将 ImageNet 转换为 wds 格式的示例脚本。
 
-**Train BAR-FSQ Tokenizer:**
+**训练 BAR-FSQ 分词器：**
+
 ```bash
 WANDB_MODE=offline WORKSPACE=/path/to/workspace \
 accelerate launch --num_machines=1 --num_processes=8 \
@@ -107,11 +110,12 @@ accelerate launch --num_machines=1 --num_processes=8 \
     dataset.params.eval_shards_path_or_url=/path/to/imagenet-val-{000000..000049}.tar
 ```
 
-**Train BAR Generator:**
+**训练 BAR 生成器：**
 
-Optionally pretokenize ImageNet dataset to NPZ format for faster training:
+可选步骤：将 ImageNet 数据集预分词为 NPZ 格式以加速训练：
+
 ```bash
-# Note: data_path should point to ImageNet in original jpeg format (train/ and val/ folders)
+# 注意：data_path 应指向原始 JPEG 格式的 ImageNet（包含 train/ 和 val/ 文件夹）
 torchrun --nproc_per_node=8 scripts/pretokenization.py \
     --img_size 256 \
     --batch_size 32 \
@@ -121,9 +125,10 @@ torchrun --nproc_per_node=8 scripts/pretokenization.py \
     --cached_path ./pretokenized_npz
 ```
 
-Train the generator:
+训练生成器：
 
-With pretokenization:
+使用预分词数据：
+
 ```bash
 WANDB_MODE=offline WORKSPACE=/path/to/workspace \
 accelerate launch --num_machines=N --num_processes=$((8*N)) \
@@ -135,7 +140,8 @@ accelerate launch --num_machines=N --num_processes=$((8*N)) \
     training.per_gpu_batch_size=$((2048 / (8*N)))
 ```
 
-Without pretokenization:
+不使用预分词数据：
+
 ```bash
 WANDB_MODE=offline WORKSPACE=/path/to/workspace \
 accelerate launch --num_machines=N --num_processes=$((8*N)) \
@@ -148,24 +154,26 @@ accelerate launch --num_machines=N --num_processes=$((8*N)) \
     training.per_gpu_batch_size=$((2048 / (8*N)))
 ```
 
-## Evaluation on ImageNet-1K
+## 在 ImageNet-1K 上评估
 
-We provide a [sampling script](./sample_imagenet.py) for reproducing generation results on ImageNet-1K benchmark.
+我们提供了[采样脚本](./sample_imagenet.py)用于在 ImageNet-1K 基准上复现生成结果。
 
-### Setup Evaluation Tools
+### 配置评估工具
+
 ```bash
-# Prepare ADM evaluation script
+# 准备 ADM 评估脚本
 git clone https://github.com/openai/guided-diffusion.git
 
-# Download reference statistics
+# 下载参考统计数据
 wget https://openaipublic.blob.core.windows.net/diffusion/jul-2021/ref_batches/imagenet/256/VIRTUAL_imagenet256_labeled.npz
 ```
 
-### Generate and Evaluate
+### 生成与评估
 
-**Example: BAR-B/4**
+**示例：BAR-B/4**
+
 ```bash
-# Generate samples
+# 生成样本
 torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
     sample_imagenet.py \
     config=configs/generator/bar_b_patch4.yaml \
@@ -176,12 +184,12 @@ torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
     model.generator.mbm_head.randomize_temperature=1.4 \
     'model.generator.mbm_head.tokens_allocation=[64,64,64,64]'
 
-# Evaluate FID
+# 评估 FID
 python3 guided-diffusion/evaluations/evaluator.py \
     VIRTUAL_imagenet256_labeled.npz \
     bar_b_patch4.npz
 
-# Expected output:
+# 预期输出：
 # Inception Score: 274.70697021484375
 # FID: 2.3366168749295753
 # sFID: 6.311607318546635
@@ -189,9 +197,10 @@ python3 guided-diffusion/evaluations/evaluator.py \
 # Recall: 0.5984
 ```
 
-**Example: BAR-B/2**
+**示例：BAR-B/2**
+
 ```bash
-# Generate samples
+# 生成样本
 torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
     sample_imagenet.py \
     config=configs/generator/bar_b_patch2.yaml \
@@ -202,12 +211,12 @@ torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
     model.generator.mbm_head.randomize_temperature=2.0 \
     'model.generator.mbm_head.tokens_allocation=[16,16,16,16]'
 
-# Evaluate FID
+# 评估 FID
 python3 guided-diffusion/evaluations/evaluator.py \
     VIRTUAL_imagenet256_labeled.npz \
     bar_b_patch2.npz
 
-# Expected output:
+# 预期输出：
 # Inception Score: 293.40704345703125
 # FID: 1.3484216683129944
 # sFID: 4.931784360145002
@@ -215,9 +224,10 @@ python3 guided-diffusion/evaluations/evaluator.py \
 # Recall: 0.6377
 ```
 
-**Example: BAR-B**
+**示例：BAR-B**
+
 ```bash
-# Generate samples
+# 生成样本
 torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
     sample_imagenet.py \
     config=configs/generator/bar_b.yaml \
@@ -228,12 +238,12 @@ torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
     model.generator.mbm_head.randomize_temperature=2.5 \
     'model.generator.mbm_head.tokens_allocation=[2,2,5,7]'
 
-# Evaluate FID
+# 评估 FID
 python3 guided-diffusion/evaluations/evaluator.py \
     VIRTUAL_imagenet256_labeled.npz \
     bar_b.npz
 
-# Expected output:
+# 预期输出：
 # Inception Score: 289.0171813964844
 # FID: 1.1292903682207225
 # sFID: 4.692096472506364
@@ -241,9 +251,10 @@ python3 guided-diffusion/evaluations/evaluator.py \
 # Recall: 0.6635
 ```
 
-**Example: BAR-L**
+**示例：BAR-L**
+
 ```bash
-# Generate samples
+# 生成样本
 torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
     sample_imagenet.py \
     config=configs/generator/bar_l.yaml \
@@ -254,12 +265,12 @@ torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
     model.generator.mbm_head.randomize_temperature=3.0 \
     'model.generator.mbm_head.tokens_allocation=[2,2,5,7]'
 
-# Evaluate FID
+# 评估 FID
 python3 guided-diffusion/evaluations/evaluator.py \
     VIRTUAL_imagenet256_labeled.npz \
     bar_l.npz
 
-# Expected output:
+# 预期输出：
 # Inception Score: 296.94757080078125
 # FID: 0.9926468757014959
 # sFID: 4.673216174301388
@@ -267,9 +278,10 @@ python3 guided-diffusion/evaluations/evaluator.py \
 # Recall: 0.6858
 ```
 
-**Example: BAR-L-res512**
+**示例：BAR-L-res512**
+
 ```bash
-# Generate samples
+# 生成样本
 torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
     sample_imagenet.py \
     config=configs/generator/bar_l_res512.yaml \
@@ -280,12 +292,12 @@ torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
     model.generator.mbm_head.randomize_temperature=2.8 \
     'model.generator.mbm_head.tokens_allocation=[2,2,2,4]'
 
-# Evaluate FID
+# 评估 FID
 python3 guided-diffusion/evaluations/evaluator.py \
     VIRTUAL_imagenet512.npz \
     bar_l_res512.npz
 
-# Expected output:
+# 预期输出：
 # Inception Score: 311.08929443359375
 # FID: 1.0937443187164604
 # sFID: 4.404387828127369
@@ -293,9 +305,9 @@ python3 guided-diffusion/evaluations/evaluator.py \
 # Recall: 0.644
 ```
 
-## Citation
+## 引用
 
-If you find this work useful, please cite:
+如果您觉得本工作有用，请引用：
 
 ```bibtex
 @article{yu2026autoregressive,
@@ -306,10 +318,10 @@ If you find this work useful, please cite:
 }
 ```
 
-## Security
+## 安全
 
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
+更多信息请参阅 [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications)。
 
-## License
+## 许可证
 
-This project is licensed under the Apache-2.0 License. See the [LICENSE](LICENSE) file for details.
+本项目基于 Apache-2.0 许可证。详情请参阅 [LICENSE](LICENSE) 文件。
