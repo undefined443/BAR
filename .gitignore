@@ -1,4 +1,8 @@
 assets
-uv.lock
 ImageNet-1K-wds
+wandb
+uv.lock
+__pycache__
+bar_*
+*.log
 .python-version
