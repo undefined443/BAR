@@ -39,7 +39,7 @@ accelerate launch --num_machines=1 --num_processes=8 \
 ### Sampling & Evaluation
 ```bash
 # Generate ImageNet samples
-torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
+torchrun --nnodes=1 --nproc-per-node=1 --rdzv-endpoint=localhost:9999 \
     sample_imagenet.py \
     config=configs/generator/bar_b.yaml \
     experiment.output_dir="bar_b" \
@@ -54,7 +54,7 @@ python3 guided-diffusion/evaluations/evaluator.py \
 
 ### Pretokenization (optional, speeds up generator training)
 ```bash
-torchrun --nproc_per_node=8 scripts/pretokenization.py \
+torchrun --nproc-per-node=8 scripts/pretokenization.py \
     --img_size 256 --batch_size 32 \
     --vae_config_path configs/tokenizer/bar_fsq_16bits.yaml \
     --vae_path assets/tokenizer/bar_fsq_16bits.bin \

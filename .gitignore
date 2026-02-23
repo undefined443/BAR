@@ -1,5 +1,6 @@
 assets
 ImageNet-1K-wds
+pretokenized_npz*
 wandb
 uv.lock
 __pycache__

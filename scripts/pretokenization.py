@@ -281,6 +281,9 @@ def main(args):
             json.dump(metadata, f, indent=2)
         print(f"Saved metadata to {metadata_file}")
 
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
 
 if __name__ == '__main__':
     args = get_args_parser()
