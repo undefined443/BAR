@@ -69,7 +69,9 @@ def main():
     tokenizer.to(device)
 
     generator = BAR(config)
-    generator.load_state_dict(torch.load(config.experiment.generator_checkpoint, map_location="cpu"))
+    checkpoint = torch.load(config.experiment.generator_checkpoint, map_location="cpu")
+    cleaned_state_dict = {k.replace("_orig_mod.", ""): v for k, v in checkpoint.items()}
+    generator.load_state_dict(cleaned_state_dict)
     generator.eval()
     generator.requires_grad_(False)
     generator.to(device)
