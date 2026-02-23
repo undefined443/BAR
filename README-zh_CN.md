@@ -106,8 +106,8 @@ accelerate launch --num_machines=1 --num_processes=8 \
     --main_process_port=9999 --same_network \
     scripts/train_bar_fsq.py \
     config=configs/tokenizer/bar_fsq_16bits.yaml \
-    dataset.params.train_shards_path_or_url=/path/to/imagenet-train-{000000..000320}.tar \
-    dataset.params.eval_shards_path_or_url=/path/to/imagenet-val-{000000..000049}.tar
+    'dataset.params.train_shards_path_or_url=/path/to/imagenet-train-{000000..000320}.tar' \
+    'dataset.params.eval_shards_path_or_url=/path/to/imagenet-val-{000000..000049}.tar'
 ```
 
 **训练 BAR 生成器：**
@@ -116,7 +116,7 @@ accelerate launch --num_machines=1 --num_processes=8 \
 
 ```bash
 # 注意：data_path 应指向原始 JPEG 格式的 ImageNet（包含 train/ 和 val/ 文件夹）
-torchrun --nproc_per_node=8 scripts/pretokenization.py \
+torchrun --nproc-per-node=8 scripts/pretokenization.py \
     --img_size 256 \
     --batch_size 32 \
     --vae_config_path configs/tokenizer/bar_fsq_16bits.yaml \
@@ -149,8 +149,8 @@ accelerate launch --num_machines=N --num_processes=$((8*N)) \
     --main_process_port=9999 --same_network \
     scripts/train_bar.py \
     config=configs/generator/bar_b_patch4.yaml \
-    dataset.params.train_shards_path_or_url=/path/to/imagenet-train-{000000..000320}.tar \
-    dataset.params.eval_shards_path_or_url=/path/to/imagenet-val-{000000..000049}.tar \
+    'dataset.params.train_shards_path_or_url=/path/to/imagenet-train-{000000..000320}.tar' \
+    'dataset.params.eval_shards_path_or_url=/path/to/imagenet-val-{000000..000049}.tar' \
     training.per_gpu_batch_size=$((2048 / (8*N)))
 ```
 
@@ -174,7 +174,7 @@ wget https://openaipublic.blob.core.windows.net/diffusion/jul-2021/ref_batches/i
 
 ```bash
 # 生成样本
-torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
+torchrun --nnodes=1 --nproc-per-node=1 --rdzv-endpoint=localhost:9999 \
     sample_imagenet.py \
     config=configs/generator/bar_b_patch4.yaml \
     experiment.output_dir="bar_b_patch4" \
@@ -201,7 +201,7 @@ python3 guided-diffusion/evaluations/evaluator.py \
 
 ```bash
 # 生成样本
-torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
+torchrun --nnodes=1 --nproc-per-node=1 --rdzv-endpoint=localhost:9999 \
     sample_imagenet.py \
     config=configs/generator/bar_b_patch2.yaml \
     experiment.output_dir="bar_b_patch2" \
@@ -228,7 +228,7 @@ python3 guided-diffusion/evaluations/evaluator.py \
 
 ```bash
 # 生成样本
-torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
+torchrun --nnodes=1 --nproc-per-node=1 --rdzv-endpoint=localhost:9999 \
     sample_imagenet.py \
     config=configs/generator/bar_b.yaml \
     experiment.output_dir="bar_b" \
@@ -255,7 +255,7 @@ python3 guided-diffusion/evaluations/evaluator.py \
 
 ```bash
 # 生成样本
-torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
+torchrun --nnodes=1 --nproc-per-node=1 --rdzv-endpoint=localhost:9999 \
     sample_imagenet.py \
     config=configs/generator/bar_l.yaml \
     experiment.output_dir="bar_l" \
@@ -282,7 +282,7 @@ python3 guided-diffusion/evaluations/evaluator.py \
 
 ```bash
 # 生成样本
-torchrun --nnodes=1 --nproc_per_node=1 --rdzv-endpoint=localhost:9999 \
+torchrun --nnodes=1 --nproc-per-node=1 --rdzv-endpoint=localhost:9999 \
     sample_imagenet.py \
     config=configs/generator/bar_l_res512.yaml \
     experiment.output_dir="bar_l_res512" \
