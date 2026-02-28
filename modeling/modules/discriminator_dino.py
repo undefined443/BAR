@@ -341,7 +341,7 @@ class FrozenDINOSmallNoDrop(nn.Module):
 
     def forward(self, x, grad_ckpt=False):
         # in RAE, x is directly resized to 224x224
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast('cuda', enabled=False):
             x = (self.x_scale * x.float()).add_(self.x_shift)
             H, W = x.shape[-2], x.shape[-1]
             if H > self.img_size and W > self.img_size and random.random() <= 0.5:
@@ -362,7 +362,7 @@ class FrozenDINOSmallNoDrop(nn.Module):
 
         x = self.patch_embed(x)
 
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast('cuda', enabled=False):
             x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x.float()), dim=1)
             x = x + self.pos_embed
             activations = [(x[:, 1:] + x[:, :1]).transpose_(1, 2)]  # readout
