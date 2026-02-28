@@ -1043,8 +1043,7 @@ def sample_images(
         generated_tokens = unwrap_generator.generate(
                     condition=labels,
                     guidance_scale=config.model.generator.guidance_scale,
-                    randomize_temperature=config.model.generator.mbm_head.randomize_temperature,
-                    tokens_allocation=config.model.generator.mbm_head.get("tokens_allocation", None),
+                    num_steps=config.model.generator.mbm_head.get("num_steps", 50),
                     sample_with_random_order=sample_with_random_order,
                     kv_cache=True,
                 )

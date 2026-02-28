@@ -129,15 +129,11 @@ def main():
         y = torch.from_numpy(all_classes[cur_idx * n: (cur_idx+1)*n]).to(device)
         cur_idx += 1
 
-        # Generate tokens
-        tokens_allocation = config.model.generator.mbm_head.get("tokens_allocation", None)
-
         generated_tokens = generator.generate(
             condition=y.long(),
             guidance_scale=config.model.generator.guidance_scale,
-            randomize_temperature=config.model.generator.mbm_head.randomize_temperature,
+            num_steps=config.model.generator.mbm_head.get("num_steps", 50),
             kv_cache=True,
-            tokens_allocation=tokens_allocation,
         )
 
         generated_image = tokenizer.decode_tokens(generated_tokens)

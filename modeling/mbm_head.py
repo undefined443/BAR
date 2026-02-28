@@ -1,15 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
 from modeling.modules.blocks import modulate, FinalLayer, SwiGLUFFN, RMSNorm
 import math
-import numpy as np
-
-try:
-    from omegaconf import ListConfig
-except ImportError:
-    ListConfig = None
 
 
 # This block is used to build adaMLP
@@ -78,9 +71,8 @@ class MaskBitModelingHead(nn.Module):
         # Always use RMSNorm and SwiGLU
         norm_layer = RMSNorm
 
-        # Input embedding and projection
-        self.input_embed = nn.Embedding(target_codebook_size + 1, math.ceil(self.width / self.seq_len))
-        self.input_proj = nn.Linear(math.ceil(self.width / self.seq_len) * self.seq_len, self.width, bias=True)
+        # Input projection from continuous analog bits [B, seq_len] -> [B, width]
+        self.input_proj = nn.Linear(seq_len, self.width, bias=True)
         self.ln_pre = norm_layer(self.width)
 
         # Transformer blocks with SwiGLU (mlp_ratio=4.0 hardcoded)
@@ -91,15 +83,11 @@ class MaskBitModelingHead(nn.Module):
                 norm_layer=norm_layer,
             ))
 
-        # Output projection
-        self.output_embed = nn.Linear(self.width, self.seq_len * target_codebook_size, bias=True)
-
-        self.mask_token_id = target_codebook_size
-        self.target_codebook_size = target_codebook_size
+        # Output projection: predict continuous x0 [B, width] -> [B, seq_len]
+        self.output_embed = nn.Linear(self.width, self.seq_len, bias=True)
 
         self.apply(self._init_weights)
 
-        self.loss_fn = nn.CrossEntropyLoss(reduction="none")
         self.t_embedder = GaussianFourierEmbedding(self.width)
         self.adaln_before_head = FinalLayer(self.width, norm_layer)
 
@@ -130,52 +118,47 @@ class MaskBitModelingHead(nn.Module):
         z = torch.randn((batch_size,), device=device) * 0.8 + 0.0
         return torch.sigmoid(z)
 
-    def _map_timesteps_to_mask_ratio(self, timesteps):
-        """Map timesteps to mask ratios using identity mapping.
-
-        In diffusion convention: t=0 means noisy (mask_ratio=1.0), t=1 means clean (mask_ratio=0.0)
+    def _get_alpha_bar(self, t):
+        """Cosine noise schedule: alpha_bar_t = cos^2(pi * t / 2).
 
         Args:
-            timesteps: Tensor of timesteps in [0, 1]
+            t: Tensor of timesteps in [0, 1], shape [B]
 
         Returns:
-            Tensor of mask ratios where 1.0 means fully masked, 0.0 means no mask
+            alpha_bar: Tensor of shape [B], values in [0, 1]
         """
-        # Direct inversion: t=0 → mask_ratio=1.0, t=1 → mask_ratio=0.0
-        mask_ratio = torch.clamp(1.0 - timesteps, min=1 / self.seq_len, max=1.)
-        return mask_ratio
+        return torch.cos(t * math.pi / 2) ** 2
 
-    def masking_input_tokens(self, input_tokens):
-        """Mask input tokens for training.
+    def _add_noise(self, x0, t):
+        """Forward diffusion process: x_t = sqrt(alpha_bar_t) * x0 + sqrt(1 - alpha_bar_t) * eps.
 
         Args:
-            input_tokens: Input tokens to mask [B, seq_len]
+            x0: Clean analog bits [B, seq_len] in {-1, +1}
+            t: Timesteps [B] in [0, 1]
 
         Returns:
-            masked_tokens, masks, mask_ratio
+            x_t: Noisy signal [B, seq_len]
+            eps: Sampled noise [B, seq_len]
         """
-        batch_size, seq_len = input_tokens.shape
-        assert seq_len == self.seq_len, f"Input tokens length {seq_len} does not match expected {self.seq_len}."
-        device = input_tokens.device
+        alpha_bar = self._get_alpha_bar(t)[:, None]  # [B, 1]
+        eps = torch.randn_like(x0)
+        x_t = alpha_bar.sqrt() * x0 + (1 - alpha_bar).sqrt() * eps
+        return x_t, eps
 
-        timesteps = self._sample_timesteps(batch_size, device)
-        mask_ratio = self._map_timesteps_to_mask_ratio(timesteps)
+    def forward_fn(self, x_t, conditions, timesteps):
+        """Run MBM head network.
 
-        num_token_masked = (seq_len * mask_ratio).round().clamp(min=1)
-        batch_randperm = torch.rand(batch_size, seq_len, device=device).argsort(dim=-1)
-        masks = batch_randperm < rearrange(num_token_masked, 'b -> b 1')
+        Args:
+            x_t: Noisy analog bits [B, seq_len] in continuous space
+            conditions: Latent conditions from BAR [B, 1, width]
+            timesteps: Diffusion timesteps [B] in [0, 1]
 
-        # Always use mask token (not random tokens)
-        mask_token_fill = torch.full_like(input_tokens, self.mask_token_id)
-        masked_tokens = torch.where(masks, mask_token_fill, input_tokens)
-        return masked_tokens, masks, mask_ratio
+        Returns:
+            x0_pred: Predicted clean analog bits [B, seq_len]
+        """
+        inputs = self.input_proj(x_t)  # [B, width]
 
-    def forward_fn(self, masked_input_ids, conditions, mask_ratio):
-        inputs = self.input_embed(masked_input_ids)
-        inputs = rearrange(inputs, 'b l c -> b (l c)')
-        inputs = self.input_proj(inputs)
-
-        t_emb = self.t_embedder(mask_ratio).unsqueeze(1)
+        t_emb = self.t_embedder(timesteps).unsqueeze(1)
         y_emb = conditions
         s = F.silu(t_emb + y_emb).squeeze(1)
 
@@ -184,161 +167,76 @@ class MaskBitModelingHead(nn.Module):
             x = self.transformer[i](x, c=s)
 
         x = self.adaln_before_head(x, s)
-        x = self.output_embed(x)
-        x = rearrange(x, 'b (s c) -> b s c', s=self.seq_len, c=self.target_codebook_size)
+        x = self.output_embed(x)  # [B, seq_len]
         return x
 
     def forward(self, target, conditions):
         """Forward pass through MBM head.
 
         Args:
-            target: Target tokens (clean labels for loss computation)
-            conditions: Latent conditions from BAR
+            target: Target tokens [B, seq_len] in {0, 1}
+            conditions: Latent conditions from BAR [B, 1, width]
         """
-        # Mask input tokens
-        masked_inputs, masks, mask_ratio = self.masking_input_tokens(target)
-        predictions = self.forward_fn(masked_inputs, conditions, mask_ratio)
+        x0 = target.float() * 2 - 1  # {0, 1} -> {-1, +1} analog bits
+        batch_size, device = x0.shape[0], x0.device
+
+        timesteps = self._sample_timesteps(batch_size, device)
+        x_t, _ = self._add_noise(x0, timesteps)
+
+        x0_pred = self.forward_fn(x_t, conditions, timesteps)
 
         with torch.amp.autocast('cuda', enabled=False):
-            loss = self.loss_fn(rearrange(predictions.float(), 'b l c -> b c l'), target)
-            masks = masks.to(loss).float()
-            # Masked tokens weighted at 1.0, unmasked at 0.1
-            loss_weights = (1.0 - masks) * 0.1 + masks
-            loss = (loss * loss_weights).sum() / (loss_weights.sum() + 1e-8)
-            return loss
-
-
-    def _sample_tokens(self, logits, annealed_temp, add_gumbel_noise):
-        """Sample tokens from logits with gumbel noise."""
-        sampled_ids = add_gumbel_noise(logits, annealed_temp).argmax(dim=-1)
-        sampled_logits = torch.squeeze(
-            torch.gather(logits, dim=-1, index=torch.unsqueeze(sampled_ids, -1)), -1)
-        return sampled_ids, sampled_logits
-
-    def _compute_masking(self, sampled_logits, next_mask_ratio, annealed_temp, add_gumbel_noise,
-                        device, is_mask):
-        """Compute which tokens to mask for next step."""
-        # Compute mask length (use round to match training behavior)
-        mask_len = torch.Tensor([np.round(self.seq_len * next_mask_ratio)]).to(device)
-        # Consider only currently masked positions
-        mask_len = torch.maximum(
-            torch.Tensor([1]).to(device),
-            torch.minimum(torch.sum(is_mask, dim=-1, keepdims=True) - 1, mask_len)
-        )[0].squeeze()
-
-        # Compute confidence and masking threshold
-        confidence = add_gumbel_noise(sampled_logits, annealed_temp)
-        sorted_confidence, _ = torch.sort(confidence, axis=-1)
-        cut_off = sorted_confidence[:, mask_len.long() - 1:mask_len.long()]
-        return confidence <= cut_off
+            loss = F.mse_loss(x0_pred.float(), x0.float())
+        return loss
 
     @torch.no_grad()
-    def sample(self, conditions, guidance_scale=3.0, randomize_temperature=4.5, tokens_allocation=[4, 4, 4, 4], use_cfg=False):
-        """Sample tokens using MBM iterative decoding.
+    def sample(self, conditions, guidance_scale=3.0, num_steps=50, use_cfg=False):
+        """Sample tokens using DDIM denoising.
 
         Args:
             conditions: Latent conditions. When CFG is used (use_cfg=True),
                        conditions are doubled: [batch_size*2, 1, width] where first half
                        is conditional, second half is unconditional.
             guidance_scale: CFG guidance scale. Used when use_cfg=True.
-            randomize_temperature: Temperature for sampling (default: 4.5)
-            tokens_allocation: Token unmasking schedule (default: [2, 2, 5, 7]).
-                             Example: [2, 2, 5, 7] means 4 steps unmasking 2, 2, 5, 7 tokens.
-                             Must sum to self.seq_len and be non-decreasing.
+            num_steps: Number of DDIM denoising steps.
             use_cfg: Whether to apply CFG. If True, conditions should be doubled.
         """
         device = conditions.device
 
         if use_cfg:
-            # CFG is active, conditions are doubled [batch_size*2, 1, width]
             batch_size = conditions.shape[0] // 2
         else:
             batch_size = conditions.shape[0]
 
-        # Helper functions for gumbel noise
-        def log(t, eps=1e-20):
-            return torch.log(t.clamp(min=eps))
+        # Start from pure Gaussian noise
+        x_t = torch.randn(batch_size, self.seq_len, device=device, dtype=conditions.dtype)
 
-        def gumbel_noise(t):
-            noise = torch.zeros_like(t).uniform_(0, 1)
-            return -log(-log(noise))
+        # t from 1.0 (noisy) to 0.0 (clean), num_steps+1 points
+        step_ts = torch.linspace(1.0, 0.0, num_steps + 1, device=device, dtype=conditions.dtype)
 
-        def add_gumbel_noise(t, temperature):
-            return t + temperature * gumbel_noise(t)
+        for i in range(num_steps):
+            t_cur = step_ts[i].view(1).expand(batch_size)    # [B]
+            t_next = step_ts[i + 1].view(1).expand(batch_size)  # [B]
 
-        # Convert OmegaConf ListConfig to plain list if needed
-        if ListConfig is not None and isinstance(tokens_allocation, ListConfig):
-            tokens_allocation = list(tokens_allocation)
-
-        # Validate tokens_allocation
-        if not isinstance(tokens_allocation, (list, tuple)):
-            raise ValueError(f"tokens_allocation must be a list or tuple, got {type(tokens_allocation)}")
-        if len(tokens_allocation) == 0:
-            raise ValueError("tokens_allocation must have at least one element")
-        if any(t <= 0 for t in tokens_allocation):
-            raise ValueError(f"tokens_allocation values must be positive, got {tokens_allocation}")
-        if sum(tokens_allocation) != self.seq_len:
-            raise ValueError(
-                f"tokens_allocation must sum to seq_len ({self.seq_len}), "
-                f"but got sum={sum(tokens_allocation)}, allocation={tokens_allocation}"
-            )
-        # Check non-decreasing
-        for i in range(len(tokens_allocation) - 1):
-            if tokens_allocation[i+1] < tokens_allocation[i]:
-                raise ValueError(
-                    f"tokens_allocation must be non-decreasing, but got {tokens_allocation}"
-                )
-
-        num_sample_steps = len(tokens_allocation)
-        cumulative_tokens = [0] + [sum(tokens_allocation[:i+1]) for i in range(len(tokens_allocation))]
-
-        # Initialize ids with mask tokens
-        ids = torch.full((batch_size, self.seq_len), self.mask_token_id, device=device)
-
-        # Sampling loop
-        for step in range(num_sample_steps):
-            # Compute mask ratios
-            mask_ratio = 1.0 - (cumulative_tokens[step] / self.seq_len)
-            next_mask_ratio = 1.0 - (cumulative_tokens[step + 1] / self.seq_len)
-
-            # Temperature annealing: from randomize_temperature to 0.0
-            ratio = step / num_sample_steps
-            annealed_temp = randomize_temperature * (1.0 - ratio)
-
-            # Prepare mask ratio tensor
-            mask_ratio_t = torch.tensor(mask_ratio, dtype=conditions.dtype, device=device)
-
-            # Forward pass with or without CFG
             if use_cfg:
-                # Apply CFG: double ids to match doubled conditions
-                mask_ratio_t = mask_ratio_t.view(1).repeat(batch_size * 2)
-                logits = self.forward_fn(torch.cat([ids, ids], dim=0), conditions, mask_ratio_t)
-                # Split and apply CFG
-                cond_logits, uncond_logits = torch.split(logits, batch_size, dim=0)
-                logits = uncond_logits + guidance_scale * (cond_logits - uncond_logits)
+                t_cat = t_cur.repeat(2)
+                x_t_cat = x_t.repeat(2, 1)
+                x0_both = self.forward_fn(x_t_cat, conditions, t_cat)
+                x0_cond, x0_uncond = x0_both.chunk(2, dim=0)
+                x0_pred = x0_uncond + guidance_scale * (x0_cond - x0_uncond)
             else:
-                mask_ratio_t = mask_ratio_t.view(1).repeat(batch_size)
-                logits = self.forward_fn(ids, conditions, mask_ratio_t)
+                x0_pred = self.forward_fn(x_t, conditions, t_cur)
 
-            # Sample tokens
-            sampled_ids, sampled_logits = self._sample_tokens(logits, annealed_temp, add_gumbel_noise)
+            x0_pred = x0_pred.clamp(-1, 1)
 
-            # Only update masked positions
-            is_mask = (ids == self.mask_token_id)
-            sampled_ids = torch.where(is_mask, sampled_ids, ids)
-            sampled_logits = torch.where(is_mask, sampled_logits, +np.inf).float()
+            # DDIM update: re-noise to t_next
+            alpha_bar_cur = self._get_alpha_bar(t_cur)[:, None]   # [B, 1]
+            alpha_bar_next = self._get_alpha_bar(t_next)[:, None]  # [B, 1]
 
-            # Update ids for next step
-            if step == num_sample_steps - 1:
-                ids = sampled_ids
-            else:
-                # Compute masking for next step
-                masking = self._compute_masking(
-                    sampled_logits, next_mask_ratio, annealed_temp, add_gumbel_noise,
-                    device, is_mask
-                )
-                ids = torch.where(masking, self.mask_token_id, sampled_ids)
+            eps_pred = (x_t - alpha_bar_cur.sqrt() * x0_pred) / (1 - alpha_bar_cur).sqrt().clamp(min=1e-8)
+            x_t = alpha_bar_next.sqrt() * x0_pred + (1 - alpha_bar_next).sqrt() * eps_pred
 
-        return ids
+        # Decode continuous analog bits to discrete {0, 1}
+        return (x_t > 0).long()
 
 
