@@ -199,7 +199,7 @@ class MaskBitModelingHead(nn.Module):
         masked_inputs, masks, mask_ratio = self.masking_input_tokens(target)
         predictions = self.forward_fn(masked_inputs, conditions, mask_ratio)
 
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast('cuda', enabled=False):
             loss = self.loss_fn(rearrange(predictions.float(), 'b l c -> b c l'), target)
             masks = masks.to(loss).float()
             # Masked tokens weighted at 1.0, unmasked at 0.1
