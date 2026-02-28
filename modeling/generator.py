@@ -468,8 +468,7 @@ class BAR(BaseModel):
     def generate(self,
                  condition,
                  guidance_scale,
-                 randomize_temperature,
-                 tokens_allocation=[4, 4, 4, 4],
+                 num_steps=50,
                  kv_cache=True,
                  sample_with_random_order=False,
                  **kwargs):
@@ -522,8 +521,7 @@ class BAR(BaseModel):
             sampled = self.lm_head.sample(
                 conditions=latent_conditions,
                 guidance_scale=cfg_scale,
-                randomize_temperature=randomize_temperature,
-                tokens_allocation=tokens_allocation,
+                num_steps=num_steps,
                 use_cfg=use_cfg,
             )
             ids = torch.cat((ids, sampled), dim=-1)
