@@ -168,7 +168,7 @@ class MaskBitModelingHead(nn.Module):
 
         x = self.adaln_before_head(x, s)
         x = self.output_embed(x)  # [B, seq_len]
-        return x
+        return torch.tanh(x)
 
     def forward(self, target, conditions):
         """Forward pass through MBM head.
