@@ -61,9 +61,11 @@ class MaskBitModelingHead(nn.Module):
     - Binary quantization (target_codebook_size=2)
     """
 
-    def __init__(self, target_codebook_size=2, num_layers=3, width=2048, seq_len=16):
+    def __init__(self, target_codebook_size=2, num_layers=3, width=2048, seq_len=16, prediction_type='x0'):
         super(MaskBitModelingHead, self).__init__()
 
+        assert prediction_type in ('x0', 'v'), f"prediction_type must be 'x0' or 'v', got {prediction_type!r}"
+        self.prediction_type = prediction_type
         self.num_layers = num_layers
         self.width = width
         self.seq_len = seq_len
@@ -143,7 +145,7 @@ class MaskBitModelingHead(nn.Module):
         alpha_bar = self._get_alpha_bar(t)[:, None]  # [B, 1]
         eps = torch.randn_like(x0)
         x_t = alpha_bar.sqrt() * x0 + (1 - alpha_bar).sqrt() * eps
-        return x_t, eps
+        return x_t, eps, alpha_bar
 
     def forward_fn(self, x_t, conditions, timesteps):
         """Run MBM head network.
@@ -181,12 +183,16 @@ class MaskBitModelingHead(nn.Module):
         batch_size, device = x0.shape[0], x0.device
 
         timesteps = self._sample_timesteps(batch_size, device)
-        x_t, _ = self._add_noise(x0, timesteps)
+        x_t, eps, alpha_bar = self._add_noise(x0, timesteps)
 
-        x0_pred = self.forward_fn(x_t, conditions, timesteps)
+        out = self.forward_fn(x_t, conditions, timesteps)
 
         with torch.amp.autocast('cuda', enabled=False):
-            loss = F.mse_loss(x0_pred.float(), x0.float())
+            if self.prediction_type == 'x0':
+                loss = F.mse_loss(out.float(), x0.float())
+            else:  # 'v'
+                v_target = alpha_bar.sqrt() * eps - (1 - alpha_bar).sqrt() * x0
+                loss = F.mse_loss(out.float(), v_target.float())
         return loss
 
     @torch.no_grad()
@@ -218,20 +224,24 @@ class MaskBitModelingHead(nn.Module):
             t_cur = step_ts[i].view(1).expand(batch_size)    # [B]
             t_next = step_ts[i + 1].view(1).expand(batch_size)  # [B]
 
+            alpha_bar_cur = self._get_alpha_bar(t_cur)[:, None]   # [B, 1]
+            alpha_bar_next = self._get_alpha_bar(t_next)[:, None]  # [B, 1]
+
             if use_cfg:
                 t_cat = t_cur.repeat(2)
                 x_t_cat = x_t.repeat(2, 1)
-                x0_both = self.forward_fn(x_t_cat, conditions, t_cat)
-                x0_cond, x0_uncond = x0_both.chunk(2, dim=0)
-                x0_pred = x0_uncond + guidance_scale * (x0_cond - x0_uncond)
+                out_both = self.forward_fn(x_t_cat, conditions, t_cat)
+                out_cond, out_uncond = out_both.chunk(2, dim=0)
+                out = out_uncond + guidance_scale * (out_cond - out_uncond)
             else:
-                x0_pred = self.forward_fn(x_t, conditions, t_cur)
+                out = self.forward_fn(x_t, conditions, t_cur)
+
+            if self.prediction_type == 'x0':
+                x0_pred = out
+            else:  # 'v'
+                x0_pred = alpha_bar_cur.sqrt() * x_t - (1 - alpha_bar_cur).sqrt() * out
 
             x0_pred = x0_pred.clamp(-1, 1)
-
-            # DDIM update: re-noise to t_next
-            alpha_bar_cur = self._get_alpha_bar(t_cur)[:, None]   # [B, 1]
-            alpha_bar_next = self._get_alpha_bar(t_next)[:, None]  # [B, 1]
 
             eps_pred = (x_t - alpha_bar_cur.sqrt() * x0_pred) / (1 - alpha_bar_cur).sqrt().clamp(min=1e-8)
             x_t = alpha_bar_next.sqrt() * x0_pred + (1 - alpha_bar_next).sqrt() * eps_pred
