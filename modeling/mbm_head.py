@@ -64,7 +64,7 @@ class MaskBitModelingHead(nn.Module):
     def __init__(self, target_codebook_size=2, num_layers=3, width=2048, seq_len=16, prediction_type='x0'):
         super(MaskBitModelingHead, self).__init__()
 
-        assert prediction_type in ('x0', 'v'), f"prediction_type must be 'x0' or 'v', got {prediction_type!r}"
+        assert prediction_type in ('x0', 'v', 'eps'), f"prediction_type must be 'x0', 'v', or 'eps', got {prediction_type!r}"
         self.prediction_type = prediction_type
         self.num_layers = num_layers
         self.width = width
@@ -190,9 +190,11 @@ class MaskBitModelingHead(nn.Module):
         with torch.amp.autocast('cuda', enabled=False):
             if self.prediction_type == 'x0':
                 loss = F.mse_loss(out.float(), x0.float())
-            else:  # 'v'
+            elif self.prediction_type == 'v':
                 v_target = alpha_bar.sqrt() * eps - (1 - alpha_bar).sqrt() * x0
                 loss = F.mse_loss(out.float(), v_target.float())
+            else:  # 'eps'
+                loss = F.mse_loss(out.float(), eps.float())
         return loss
 
     @torch.no_grad()
@@ -238,10 +240,12 @@ class MaskBitModelingHead(nn.Module):
 
             if self.prediction_type == 'x0':
                 x0_pred = out
-            else:  # 'v'
+            elif self.prediction_type == 'v':
                 x0_pred = alpha_bar_cur.sqrt() * x_t - (1 - alpha_bar_cur).sqrt() * out
+            else:  # 'eps'
+                x0_pred = (x_t - (1 - alpha_bar_cur).sqrt() * out) / alpha_bar_cur.sqrt().clamp(min=1e-8)
 
-            x0_pred = x0_pred.clamp(-1, 1)
+            x0_pred = x0_pred.sign()
 
             eps_pred = (x_t - alpha_bar_cur.sqrt() * x0_pred) / (1 - alpha_bar_cur).sqrt().clamp(min=1e-8)
             x_t = alpha_bar_next.sqrt() * x0_pred + (1 - alpha_bar_next).sqrt() * eps_pred
