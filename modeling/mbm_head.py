@@ -61,11 +61,9 @@ class MaskBitModelingHead(nn.Module):
     - Binary quantization (target_codebook_size=2)
     """
 
-    def __init__(self, target_codebook_size=2, num_layers=3, width=2048, seq_len=16, prediction_type='x0'):
+    def __init__(self, target_codebook_size=2, num_layers=3, width=2048, seq_len=16):
         super(MaskBitModelingHead, self).__init__()
 
-        assert prediction_type in ('x0', 'v', 'eps'), f"prediction_type must be 'x0', 'v', or 'eps', got {prediction_type!r}"
-        self.prediction_type = prediction_type
         self.num_layers = num_layers
         self.width = width
         self.seq_len = seq_len
@@ -85,8 +83,8 @@ class MaskBitModelingHead(nn.Module):
                 norm_layer=norm_layer,
             ))
 
-        # Output projection: predict continuous x0 [B, width] -> [B, seq_len]
-        self.output_embed = nn.Linear(self.width, self.seq_len, bias=True)
+        # Output projection: predict bit logits [B, width] -> [B, seq_len, 2]
+        self.output_embed = nn.Linear(self.width, self.seq_len * 2, bias=True)
 
         self.apply(self._init_weights)
 
@@ -169,8 +167,8 @@ class MaskBitModelingHead(nn.Module):
             x = self.transformer[i](x, c=s)
 
         x = self.adaln_before_head(x, s)
-        x = self.output_embed(x)  # [B, seq_len]
-        return x
+        x = self.output_embed(x)  # [B, seq_len * 2]
+        return x.view(x.shape[0], self.seq_len, 2)  # [B, seq_len, 2]
 
     def forward(self, target, conditions):
         """Forward pass through MBM head.
@@ -183,18 +181,13 @@ class MaskBitModelingHead(nn.Module):
         batch_size, device = x0.shape[0], x0.device
 
         timesteps = self._sample_timesteps(batch_size, device)
-        x_t, eps, alpha_bar = self._add_noise(x0, timesteps)
+        x_t, _, _ = self._add_noise(x0, timesteps)
 
         out = self.forward_fn(x_t, conditions, timesteps)
 
         with torch.amp.autocast('cuda', enabled=False):
-            if self.prediction_type == 'x0':
-                loss = F.mse_loss(out.float(), x0.float())
-            elif self.prediction_type == 'v':
-                v_target = alpha_bar.sqrt() * eps - (1 - alpha_bar).sqrt() * x0
-                loss = F.mse_loss(out.float(), v_target.float())
-            else:  # 'eps'
-                loss = F.mse_loss(out.float(), eps.float())
+            # out: [B, seq_len, 2], target: [B, seq_len] in {0, 1}
+            loss = F.cross_entropy(out.float().permute(0, 2, 1), target.long())
         return loss
 
     @torch.no_grad()
@@ -238,14 +231,8 @@ class MaskBitModelingHead(nn.Module):
             else:
                 out = self.forward_fn(x_t, conditions, t_cur)
 
-            if self.prediction_type == 'x0':
-                x0_pred = out
-            elif self.prediction_type == 'v':
-                x0_pred = alpha_bar_cur.sqrt() * x_t - (1 - alpha_bar_cur).sqrt() * out
-            else:  # 'eps'
-                x0_pred = (x_t - (1 - alpha_bar_cur).sqrt() * out) / alpha_bar_cur.sqrt().clamp(min=1e-8)
-
-            x0_pred = x0_pred.sign()
+            # out: [B, seq_len, 2] logits -> argmax -> {0,1} -> {-1,+1}
+            x0_pred = out.argmax(dim=-1).float() * 2 - 1
 
             eps_pred = (x_t - alpha_bar_cur.sqrt() * x0_pred) / (1 - alpha_bar_cur).sqrt().clamp(min=1e-8)
             x_t = alpha_bar_next.sqrt() * x0_pred + (1 - alpha_bar_next).sqrt() * eps_pred
