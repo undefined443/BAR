@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "train_bar_fsq",
+      "type": "debugpy",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "python": ".venv/bin/python",
+      "module": "accelerate.commands.launch",
+      "args": [
+        "--num_machines=1",
+        "--num_processes=1",
+        "--machine_rank=0",
+        "--main_process_ip=127.0.0.1",
+        "--main_process_port=9999",
+        "--same_network",
+        "scripts/train_bar_fsq.py",
+        "config=configs/tokenizer/bar_fsq_16bits.yaml",
+        "training.per_gpu_batch_size=1",
+        "training.gradient_accumulation_steps=1",
+        "dataset.params.train_shards_path_or_url=ImageNet-1K-wds/imagenet-train-{000000..000320}.tar",
+        "dataset.params.eval_shards_path_or_url=ImageNet-1K-wds/imagenet-val-{000000..000049}.tar"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "OMP_NUM_THREADS": "1"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
