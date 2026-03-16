@@ -19,8 +19,8 @@
         "config=configs/tokenizer/bar_fsq_16bits.yaml",
         "training.per_gpu_batch_size=1",
         "training.gradient_accumulation_steps=1",
-        "dataset.params.train_shards_path_or_url=ImageNet-1K-wds/imagenet-train-{000000..000320}.tar",
-        "dataset.params.eval_shards_path_or_url=ImageNet-1K-wds/imagenet-val-{000000..000049}.tar"
+        "dataset.params.train_shards_path_or_url=ImageNet-1K-wds/imagenet-train-000000.tar",
+        "dataset.params.eval_shards_path_or_url=ImageNet-1K-wds/imagenet-val-000000.tar"
       ],
       "env": {
         "PYTHONPATH": "${workspaceFolder}",
