@@ -34,6 +34,9 @@ class BAR(BaseModel):
         self.patch_size = config.model.generator.get("patch_size", 1)
         self.patch_size_sq = self.patch_size ** 2
 
+        if self.patch_size != 1:
+            raise ValueError("One-hot token ID MBM currently requires patch_size=1.")
+
         if self.original_image_seq_len % self.patch_size_sq != 0:
             raise ValueError(
                 f"image_seq_len {self.original_image_seq_len} must be divisible by "
@@ -126,9 +129,9 @@ class BAR(BaseModel):
 
         self.norm = norm_layer(embed_dim)
 
-        # FSQ uses token_size
+        # FSQ uses token_size, and one-hot token ID MBM keeps one token per position.
         self.base_vq_split_channel = config.model.vq_model.token_size
-        self.vq_split_channel = self.base_vq_split_channel * self.patch_size_sq
+        self.vq_split_channel = self.base_vq_split_channel
 
         # MaskBitModeling head for per-token prediction
         mbm_head_config = config.model.generator.mbm_head
@@ -137,6 +140,7 @@ class BAR(BaseModel):
                 num_layers=mbm_head_config.get("num_layers", 3),
                 width=mbm_head_config.get("width", 2048),
                 seq_len=self.vq_split_channel,
+                token_vocab_size=config.model.vq_model.codebook_size,
             )
         self.latent_condition_proj = nn.Linear(embed_dim, self.lm_head.width)
 
@@ -539,5 +543,4 @@ class BAR(BaseModel):
             ids = self._upsample_tokens(ids)
 
         return ids.view(ids.shape[0], -1)
-
 

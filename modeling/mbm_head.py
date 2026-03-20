@@ -61,18 +61,19 @@ class MaskBitModelingHead(nn.Module):
     - Binary quantization (target_codebook_size=2)
     """
 
-    def __init__(self, target_codebook_size=2, num_layers=3, width=2048, seq_len=16):
+    def __init__(self, target_codebook_size=2, num_layers=3, width=2048, seq_len=16, token_vocab_size=None):
         super(MaskBitModelingHead, self).__init__()
 
         self.num_layers = num_layers
         self.width = width
         self.seq_len = seq_len
+        self.token_vocab_size = token_vocab_size or (2 ** seq_len)
 
         # Always use RMSNorm and SwiGLU
         norm_layer = RMSNorm
 
-        # Input projection from continuous analog bits [B, seq_len] -> [B, width]
-        self.input_proj = nn.Linear(seq_len, self.width, bias=True)
+        # Input projection from noisy categorical token states [B, vocab_size] -> [B, width]
+        self.input_proj = nn.Linear(self.token_vocab_size, self.width, bias=True)
         self.ln_pre = norm_layer(self.width)
 
         # Transformer blocks with SwiGLU (mlp_ratio=4.0 hardcoded)
@@ -83,13 +84,15 @@ class MaskBitModelingHead(nn.Module):
                 norm_layer=norm_layer,
             ))
 
-        # Output projection: predict bit logits [B, width] -> [B, seq_len, 2]
-        self.output_embed = nn.Linear(self.width, self.seq_len * 2, bias=True)
+        # Output projection: predict token logits [B, width] -> [B, vocab_size]
+        self.output_embed = nn.Linear(self.width, self.token_vocab_size, bias=True)
 
         self.apply(self._init_weights)
 
         self.t_embedder = GaussianFourierEmbedding(self.width)
         self.adaln_before_head = FinalLayer(self.width, norm_layer)
+        basis = 2 ** torch.arange(self.seq_len, dtype=torch.long)
+        self.register_buffer("bit_basis", basis, persistent=False)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -130,31 +133,33 @@ class MaskBitModelingHead(nn.Module):
         return torch.cos(t * math.pi / 2) ** 2
 
     def _add_noise(self, x0, t):
-        """Forward diffusion process: x_t = sqrt(alpha_bar_t) * x0 + sqrt(1 - alpha_bar_t) * eps.
-
-        Args:
-            x0: Clean analog bits [B, seq_len] in {-1, +1}
-            t: Timesteps [B] in [0, 1]
-
-        Returns:
-            x_t: Noisy signal [B, seq_len]
-            eps: Sampled noise [B, seq_len]
-        """
+        """Forward diffusion process in continuous token-state space."""
         alpha_bar = self._get_alpha_bar(t)[:, None]  # [B, 1]
         eps = torch.randn_like(x0)
         x_t = alpha_bar.sqrt() * x0 + (1 - alpha_bar).sqrt() * eps
         return x_t, eps, alpha_bar
 
+    def bits_to_token_ids(self, target):
+        """Convert per-token binary codes to integer token IDs."""
+        target = target.long()
+        return (target * self.bit_basis).sum(dim=-1)
+
+    def token_ids_to_bits(self, token_ids):
+        """Convert integer token IDs to per-token binary codes."""
+        token_ids = token_ids.long().unsqueeze(-1)
+        bit_positions = torch.arange(self.seq_len, device=token_ids.device)
+        return ((token_ids >> bit_positions) & 1).long()
+
     def forward_fn(self, x_t, conditions, timesteps):
         """Run MBM head network.
 
         Args:
-            x_t: Noisy analog bits [B, seq_len] in continuous space
+            x_t: Noisy categorical token states [B, vocab_size] in continuous space
             conditions: Latent conditions from BAR [B, 1, width]
             timesteps: Diffusion timesteps [B] in [0, 1]
 
         Returns:
-            x0_pred: Predicted clean analog bits [B, seq_len]
+            token_logits: Predicted token logits [B, vocab_size]
         """
         inputs = self.input_proj(x_t)  # [B, width]
 
@@ -167,8 +172,7 @@ class MaskBitModelingHead(nn.Module):
             x = self.transformer[i](x, c=s)
 
         x = self.adaln_before_head(x, s)
-        x = self.output_embed(x)  # [B, seq_len * 2]
-        return x.view(x.shape[0], self.seq_len, 2)  # [B, seq_len, 2]
+        return self.output_embed(x)  # [B, vocab_size]
 
     def forward(self, target, conditions):
         """Forward pass through MBM head.
@@ -177,7 +181,8 @@ class MaskBitModelingHead(nn.Module):
             target: Target tokens [B, seq_len] in {0, 1}
             conditions: Latent conditions from BAR [B, 1, width]
         """
-        x0 = target.float() * 2 - 1  # {0, 1} -> {-1, +1} analog bits
+        token_ids = self.bits_to_token_ids(target)
+        x0 = F.one_hot(token_ids, num_classes=self.token_vocab_size).to(dtype=conditions.dtype)
         batch_size, device = x0.shape[0], x0.device
 
         timesteps = self._sample_timesteps(batch_size, device)
@@ -186,8 +191,7 @@ class MaskBitModelingHead(nn.Module):
         out = self.forward_fn(x_t, conditions, timesteps)
 
         with torch.amp.autocast('cuda', enabled=False):
-            # out: [B, seq_len, 2], target: [B, seq_len] in {0, 1}
-            loss = F.cross_entropy(out.float().permute(0, 2, 1), target.long())
+            loss = F.cross_entropy(out.float(), token_ids)
         return loss
 
     @torch.no_grad()
@@ -209,8 +213,8 @@ class MaskBitModelingHead(nn.Module):
         else:
             batch_size = conditions.shape[0]
 
-        # Start from pure Gaussian noise
-        x_t = torch.randn(batch_size, self.seq_len, device=device, dtype=conditions.dtype)
+        # Start from pure Gaussian noise in continuous token-state space.
+        x_t = torch.randn(batch_size, self.token_vocab_size, device=device, dtype=conditions.dtype)
 
         # t from 1.0 (noisy) to 0.0 (clean), num_steps+1 points
         step_ts = torch.linspace(1.0, 0.0, num_steps + 1, device=device, dtype=conditions.dtype)
@@ -231,13 +235,12 @@ class MaskBitModelingHead(nn.Module):
             else:
                 out = self.forward_fn(x_t, conditions, t_cur)
 
-            # out: [B, seq_len, 2] logits -> argmax -> {0,1} -> {-1,+1}
-            x0_pred = out.argmax(dim=-1).float() * 2 - 1
+            token_ids = out.argmax(dim=-1)
+            x0_pred = F.one_hot(token_ids, num_classes=self.token_vocab_size).to(dtype=x_t.dtype)
 
             eps_pred = (x_t - alpha_bar_cur.sqrt() * x0_pred) / (1 - alpha_bar_cur).sqrt().clamp(min=1e-8)
             x_t = alpha_bar_next.sqrt() * x0_pred + (1 - alpha_bar_next).sqrt() * eps_pred
 
-        # Decode continuous analog bits to discrete {0, 1}
-        return (x_t > 0).long()
-
+        token_ids = x_t.argmax(dim=-1)
+        return self.token_ids_to_bits(token_ids)
 
