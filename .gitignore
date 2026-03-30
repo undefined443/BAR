@@ -1,0 +1,10 @@
+.worktree
+assets
+bar_*
+__pycache__
+pretokenized_npz*
+ImageNet-1K-wds
+uv.lock
+wandb
+.python-version
+*.log

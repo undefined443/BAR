@@ -55,20 +55,23 @@ def main():
     torch.set_grad_enabled(False)
 
     # setup DDP.
-    dist.init_process_group("nccl")
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    torch.cuda.set_device(local_rank)
+    dist.init_process_group("nccl", device_id=torch.device(f"cuda:{local_rank}"))
     rank = dist.get_rank()
-    world_size = dist.get_world_size() 
-    device = rank % torch.cuda.device_count()
+    world_size = dist.get_world_size()
+    device = local_rank
     seed = seed + rank
     torch.manual_seed(seed)
-    torch.cuda.set_device(device)
     print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.") 
 
     tokenizer = get_pretrained_tokenizer(config)
     tokenizer.to(device)
 
     generator = BAR(config)
-    generator.load_state_dict(torch.load(config.experiment.generator_checkpoint, map_location="cpu"))
+    checkpoint = torch.load(config.experiment.generator_checkpoint, map_location="cpu")
+    cleaned_state_dict = {k.replace("_orig_mod.", ""): v for k, v in checkpoint.items()}
+    generator.load_state_dict(cleaned_state_dict)
     generator.eval()
     generator.requires_grad_(False)
     generator.to(device)
