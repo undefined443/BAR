@@ -14,15 +14,16 @@ def broadcat(tensors, dim=-1):
     """Broadcast and concatenate tensors along a dimension."""
     num_tensors = len(tensors)
     shape_lens = set(list(map(lambda t: len(t.shape), tensors)))
-    assert len(shape_lens) == 1, 'tensors must all have the same number of dimensions'
+    assert len(shape_lens) == 1, "tensors must all have the same number of dimensions"
     shape_len = list(shape_lens)[0]
 
     dim = (dim + shape_len) if dim < 0 else dim
     dims = list(zip(*map(lambda t: list(t.shape), tensors)))
 
     expandable_dims = [(i, val) for i, val in enumerate(dims) if i != dim]
-    assert all([*map(lambda t: len(set(t[1])) <= 2, expandable_dims)]), \
-        'invalid dimensions for broadcastable concatentation'
+    assert all([*map(lambda t: len(set(t[1])) <= 2, expandable_dims)]), (
+        "invalid dimensions for broadcastable concatentation"
+    )
     max_dims = list(map(lambda t: (t[0], max(t[1])), expandable_dims))
     expanded_dims = list(map(lambda t: (t[0], (t[1],) * num_tensors), max_dims))
     expanded_dims.insert(dim, (dim, dims[dim]))
@@ -33,10 +34,10 @@ def broadcat(tensors, dim=-1):
 
 def rotate_half(x):
     """Rotate half the hidden dims of the input."""
-    x = rearrange(x, '... (d r) -> ... d r', r=2)
+    x = rearrange(x, "... (d r) -> ... d r", r=2)
     x1, x2 = x.unbind(dim=-1)
     x = torch.stack((-x2, x1), dim=-1)
-    return rearrange(x, '... d r -> ... (d r)')
+    return rearrange(x, "... d r -> ... (d r)")
 
 
 class VisionRotaryEmbeddingFast(nn.Module):
@@ -63,25 +64,27 @@ class VisionRotaryEmbeddingFast(nn.Module):
         pt_seq_len=16,
         ft_seq_len=None,
         custom_freqs=None,
-        freqs_for='lang',
+        freqs_for="lang",
         theta=10000,
         max_freq=10,
         num_freqs=1,
-        num_cls_token=0
+        num_cls_token=0,
     ):
         super().__init__()
 
         # Frequency computation based on different modes
         if custom_freqs is not None:
             freqs = custom_freqs
-        elif freqs_for == 'lang':
-            freqs = 1. / (theta ** (torch.arange(0, dim, 2)[:(dim // 2)].float() / dim))
-        elif freqs_for == 'pixel':
-            freqs = torch.linspace(1., max_freq / 2, dim // 2) * math.pi
-        elif freqs_for == 'constant':
+        elif freqs_for == "lang":
+            freqs = 1.0 / (
+                theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
+            )
+        elif freqs_for == "pixel":
+            freqs = torch.linspace(1.0, max_freq / 2, dim // 2) * math.pi
+        elif freqs_for == "constant":
             freqs = torch.ones(num_freqs).float()
         else:
-            raise ValueError(f'unknown modality {freqs_for}')
+            raise ValueError(f"unknown modality {freqs_for}")
 
         # Sequence length handling
         if ft_seq_len is None:
@@ -89,7 +92,7 @@ class VisionRotaryEmbeddingFast(nn.Module):
         t = torch.arange(ft_seq_len).float() / ft_seq_len * pt_seq_len
 
         # Frequency computation for 2D spatial positions
-        freqs = torch.einsum('..., f -> ... f', t, freqs)
+        freqs = torch.einsum("..., f -> ... f", t, freqs)
         freqs = freqs.repeat_interleave(2, dim=-1)  # repeat each frequency twice
         freqs = broadcat((freqs[:, None, :], freqs[None, :, :]), dim=-1)
 
@@ -100,8 +103,12 @@ class VisionRotaryEmbeddingFast(nn.Module):
             sin_img = freqs_flat.sin()
 
             N_img, D = cos_img.shape
-            cos_pad = torch.ones(num_cls_token, D, dtype=cos_img.dtype, device=cos_img.device)
-            sin_pad = torch.zeros(num_cls_token, D, dtype=sin_img.dtype, device=sin_img.device)
+            cos_pad = torch.ones(
+                num_cls_token, D, dtype=cos_img.dtype, device=cos_img.device
+            )
+            sin_pad = torch.zeros(
+                num_cls_token, D, dtype=sin_img.dtype, device=sin_img.device
+            )
 
             freqs_cos = torch.cat([cos_pad, cos_img], dim=0)
             freqs_sin = torch.cat([sin_pad, sin_img], dim=0)
@@ -110,10 +117,10 @@ class VisionRotaryEmbeddingFast(nn.Module):
             freqs_sin = freqs.sin().reshape(-1, freqs.shape[-1])
 
         # Register as buffers
-        self.register_buffer('freqs_cos', freqs_cos)
-        self.register_buffer('freqs_sin', freqs_sin)
+        self.register_buffer("freqs_cos", freqs_cos)
+        self.register_buffer("freqs_sin", freqs_sin)
 
-    @torch.amp.autocast(device_type='cuda', enabled=False)
+    @torch.amp.autocast(device_type="cuda", enabled=False)
     def forward(self, t, rope_order=None):
         """Apply rotary position embedding to input tensor.
 

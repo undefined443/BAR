@@ -1,7 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from einops import rearrange, reduce
 from torch.amp import autocast
 
 
@@ -11,29 +9,45 @@ class FSQ(nn.Module):
     Quantizes continuous features into discrete levels per channel without a learned codebook.
     Binary quantization (levels_per_channel=2) is always used.
     """
-    def __init__(self,
-                 in_channel=None,
-                 out_channel=None,
-                 token_size=16,  # equals to number of channels, as FSQ applies quant per channel
-                 config=None):
+
+    def __init__(
+        self,
+        in_channel=None,
+        out_channel=None,
+        token_size=16,  # equals to number of channels, as FSQ applies quant per channel
+        config=None,
+    ):
         super().__init__()
         self.config = config
         self.token_size = token_size
         self.levels_per_channel = 2  # Binary quantization is always used
 
-        self.in_proj = nn.Linear(in_channel, token_size) if in_channel is not None else nn.Identity()
-        self.out_proj = nn.Linear(token_size, out_channel) if out_channel is not None else nn.Identity()
+        self.in_proj = (
+            nn.Linear(in_channel, token_size)
+            if in_channel is not None
+            else nn.Identity()
+        )
+        self.out_proj = (
+            nn.Linear(token_size, out_channel)
+            if out_channel is not None
+            else nn.Identity()
+        )
 
         # Quantize to 2 levels per channel
         levels = [self.levels_per_channel] * token_size
-        assert config.model.vq_model.codebook_size == self.levels_per_channel ** token_size, \
-            f"codebook_size {config.model.vq_model.codebook_size} != " \
+        assert (
+            config.model.vq_model.codebook_size == self.levels_per_channel**token_size
+        ), (
+            f"codebook_size {config.model.vq_model.codebook_size} != "
             f"levels_per_channel {self.levels_per_channel} ** token_size {token_size}"
+        )
 
         _levels = torch.tensor(levels, dtype=torch.int64)
         self.register_buffer("_levels", _levels, persistent=False)
 
-        _basis = torch.cumprod(torch.tensor([1] + levels[:-1]), dim=0, dtype=torch.int64)
+        _basis = torch.cumprod(
+            torch.tensor([1] + levels[:-1]), dim=0, dtype=torch.int64
+        )
         self.register_buffer("_basis", _basis, persistent=False)
 
         self.codebook_size = config.model.vq_model.codebook_size
@@ -77,7 +91,6 @@ class FSQ(nn.Module):
         half_width = self._levels // 2  # For levels=2: half_width=1
         return (quantized / half_width) * 2 + 1
 
-
     def _scale_and_shift(self, zhat_normalized):
         """Scale normalized codes {-1, +1} to integer levels {0, 1}.
 
@@ -92,8 +105,9 @@ class FSQ(nn.Module):
         For binary quantization: {0, 1} -> {-1, +1}
         """
         # Sanity check: zhat should only contain 0 or 1
-        assert torch.all((zhat == 0) | (zhat == 1)), \
+        assert torch.all((zhat == 0) | (zhat == 1)), (
             f"Expected zhat to contain only 0 or 1, but got values in range [{zhat.min()}, {zhat.max()}]"
+        )
 
         # Map {0, 1} to {-1, +1}
         return zhat.float() * 2 - 1
@@ -130,7 +144,7 @@ class FSQ(nn.Module):
         per_level_codes = per_level_codes.to(torch.int64)
         return self._scale_and_shift_inverse(per_level_codes)
 
-    @autocast(device_type='cuda', enabled=False)
+    @autocast(device_type="cuda", enabled=False)
     def forward(self, z, condition=None):
         """Forward pass: quantize continuous features with binary quantization.
 
@@ -155,8 +169,6 @@ class FSQ(nn.Module):
         z_quantized = self.out_proj(z_quantized)
 
         # Return zero losses (no commitment loss, no entropy loss)
-        result_dict = dict(
-            min_encoding_indices=min_encoding_indices
-        )
+        result_dict = dict(min_encoding_indices=min_encoding_indices)
 
         return z_quantized, result_dict

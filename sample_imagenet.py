@@ -4,16 +4,12 @@ import torch
 import torch.distributed as dist
 from PIL import Image
 import os
-import math
 import time
 from tqdm import tqdm
 
-from utils.train_utils import (
-    get_config, create_model_and_loss_module, get_pretrained_tokenizer,
-    create_optimizer, create_lr_scheduler, create_dataloader,
-    auto_resume, save_checkpoint, 
-    generator_train_one_epoch)
+from utils.train_utils import get_pretrained_tokenizer
 from modeling.generator import BAR
+
 
 def get_config_cli():
     cli_conf = OmegaConf.from_cli()
@@ -22,6 +18,7 @@ def get_config_cli():
     conf = OmegaConf.merge(yaml_conf, cli_conf)
 
     return conf
+
 
 def create_npz_from_sample_folder(sample_dir, num=50_000):
     """
@@ -63,7 +60,7 @@ def main():
     device = local_rank
     seed = seed + rank
     torch.manual_seed(seed)
-    print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.") 
+    print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
 
     tokenizer = get_pretrained_tokenizer(config)
     tokenizer.to(device)
@@ -87,8 +84,8 @@ def main():
             print(f"Saving .png samples at {sample_folder_dir}")
     else:
         if rank == 0:
-            print(f"Speed benchmark mode: skipping image saving and npz creation")
-            print(f"GPU warmup: first 10 batches will be excluded from timing")
+            print("Speed benchmark mode: skipping image saving and npz creation")
+            print("GPU warmup: first 10 batches will be excluded from timing")
     dist.barrier()
 
     # Figure out how many samples we need to generate on each GPU and how many iterations we need to run:
@@ -99,7 +96,9 @@ def main():
         print(f"Total number of images that will be sampled: {num_fid_samples}")
 
     samples_needed_this_gpu = int(num_fid_samples // dist.get_world_size())
-    assert samples_needed_this_gpu % n == 0, "samples_needed_this_gpu must be divisible by the per-GPU batch size"
+    assert samples_needed_this_gpu % n == 0, (
+        "samples_needed_this_gpu must be divisible by the per-GPU batch size"
+    )
     iterations = int(samples_needed_this_gpu // n)
     pbar = range(iterations)
     pbar = tqdm(pbar) if rank == 0 else pbar
@@ -112,7 +111,9 @@ def main():
     all_classes = all_classes[:num_fid_samples]  # Trim to exact number
 
     subset_len = len(all_classes) // world_size
-    all_classes = np.array(all_classes[rank * subset_len: (rank+1)*subset_len], dtype=np.int64)
+    all_classes = np.array(
+        all_classes[rank * subset_len : (rank + 1) * subset_len], dtype=np.int64
+    )
     cur_idx = 0
 
     # Benchmark variables
@@ -126,11 +127,13 @@ def main():
             torch.cuda.synchronize()
             start_time = time.time()
 
-        y = torch.from_numpy(all_classes[cur_idx * n: (cur_idx+1)*n]).to(device)
+        y = torch.from_numpy(all_classes[cur_idx * n : (cur_idx + 1) * n]).to(device)
         cur_idx += 1
 
         # Generate tokens
-        tokens_allocation = config.model.generator.mbm_head.get("tokens_allocation", None)
+        tokens_allocation = config.model.generator.mbm_head.get(
+            "tokens_allocation", None
+        )
 
         generated_tokens = generator.generate(
             condition=y.long(),
@@ -142,11 +145,16 @@ def main():
 
         generated_image = tokenizer.decode_tokens(generated_tokens)
         # shift from [-1, 1] to [0, 1]
-        generated_image = (generated_image + 1.) / 2.
+        generated_image = (generated_image + 1.0) / 2.0
 
         if not sample_speed_benchmark:
             samples = torch.clamp(generated_image, 0.0, 1.0)
-            samples = (samples * 255.0).permute(0, 2, 3, 1).to("cpu", dtype=torch.uint8).numpy()
+            samples = (
+                (samples * 255.0)
+                .permute(0, 2, 3, 1)
+                .to("cpu", dtype=torch.uint8)
+                .numpy()
+            )
 
             # Save samples to disk as individual .png files
             for i, sample in enumerate(samples):
@@ -175,14 +183,14 @@ def main():
 
         if rank == 0:
             images_per_sec = benchmark_images / max_elapsed
-            print(f"\n{'='*60}")
-            print(f"Speed Benchmark Results:")
+            print(f"\n{'=' * 60}")
+            print("Speed Benchmark Results:")
             print(f"  Warmup batches: {warmup_batches} (skipped from timing)")
             print(f"  Benchmarked images: {benchmark_images}")
             print(f"  Total time: {max_elapsed:.2f} seconds")
             print(f"  Throughput: {images_per_sec:.2f} images/sec")
-            print(f"  Per-GPU throughput: {images_per_sec/world_size:.2f} images/sec")
-            print(f"{'='*60}")
+            print(f"  Per-GPU throughput: {images_per_sec / world_size:.2f} images/sec")
+            print(f"{'=' * 60}")
     else:
         if rank == 0:
             create_npz_from_sample_folder(sample_folder_dir, num_fid_samples)
@@ -190,6 +198,7 @@ def main():
 
     dist.barrier()
     dist.destroy_process_group()
+
 
 if __name__ == "__main__":
     main()

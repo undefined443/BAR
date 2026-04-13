@@ -34,8 +34,13 @@ class _ColorfulFormatter(logging.Formatter):
 
 
 @functools.lru_cache()
-def setup_logger(name="TiTok", log_level: str = None, color=True, use_accelerate=True,
-                 output_file=None):
+def setup_logger(
+    name="TiTok",
+    log_level: str = None,
+    color=True,
+    use_accelerate=True,
+    output_file=None,
+):
     logger = logging.getLogger(name)
     if log_level is None:
         logger.setLevel(logging.DEBUG)

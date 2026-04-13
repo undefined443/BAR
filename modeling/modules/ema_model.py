@@ -1,9 +1,8 @@
 """This file contains some base class implementation for EMA.
 
-This file is borrowed from 
+This file is borrowed from
 https://github.com/huggingface/open-muse/blob/64e1afe033717d795866ab8204484705cd4dc3f7/muse/modeling_ema.py#L8
 """
-
 
 import copy
 from typing import Any, Iterable, Optional, Union
@@ -13,6 +12,7 @@ import torch
 
 class EMAModel:
     """Exponential Moving Average of models weights."""
+
     def __init__(
         self,
         parameters: Iterable[torch.nn.Parameter],
@@ -25,7 +25,7 @@ class EMAModel:
         inv_gamma: Union[float, int] = 1.0,
         power: Union[float, int] = 2 / 3,
         model_cls: Optional[Any] = None,
-        **model_config_kwargs
+        **model_config_kwargs,
     ):
         """
         Args:
@@ -65,7 +65,9 @@ class EMAModel:
         self.model_config_kwargs = model_config_kwargs
 
     @classmethod
-    def from_pretrained(cls, checkpoint, model_cls, **model_config_kwargs) -> "EMAModel":
+    def from_pretrained(
+        cls, checkpoint, model_cls, **model_config_kwargs
+    ) -> "EMAModel":
         model = model_cls(**model_config_kwargs)
         model.load_pretrained_weight(checkpoint)
 
@@ -74,15 +76,19 @@ class EMAModel:
 
     def save_pretrained(self, path):
         if self.model_cls is None:
-            raise ValueError("`save_pretrained` can only be used if `model_cls` was defined at __init__.")
+            raise ValueError(
+                "`save_pretrained` can only be used if `model_cls` was defined at __init__."
+            )
 
         if self.model_config_kwargs is None:
-            raise ValueError("`save_pretrained` can only be used if `model_config_kwargs` was defined at __init__.")
+            raise ValueError(
+                "`save_pretrained` can only be used if `model_config_kwargs` was defined at __init__."
+            )
 
         model = self.model_cls(**self.model_config_kwargs)
         self.copy_to(model.parameters())
         model.save_pretrained_weight(path)
-    
+
     def set_step(self, optimization_step: int):
         self.optimization_step = optimization_step
 
@@ -143,7 +149,9 @@ class EMAModel:
         """
         # .to() on the tensors handles None correctly
         self.shadow_params = [
-            p.to(device=device, dtype=dtype) if p.is_floating_point() else p.to(device=device)
+            p.to(device=device, dtype=dtype)
+            if p.is_floating_point()
+            else p.to(device=device)
             for p in self.shadow_params
         ]
 
@@ -179,14 +187,16 @@ class EMAModel:
           the model with EMA parameters without affecting the original optimization process.
             Store the parameters before the `copy_to()` method. After validation (or
               model saving), use this to restore the former parameters.
-        
+
         Args:
             parameters: Iterable of `torch.nn.Parameter`; the parameters to be
                 updated with the stored parameters. If `None`, the parameters with which this
                 `ExponentialMovingAverage` was initialized will be used.
         """
         if self.temp_stored_params is None:
-            raise RuntimeError("This ExponentialMovingAverage has no `store()`ed weights to `restore()`")
+            raise RuntimeError(
+                "This ExponentialMovingAverage has no `store()`ed weights to `restore()`"
+            )
         for c_param, param in zip(self.temp_stored_params, parameters):
             param.data.copy_(c_param.data)
 
@@ -196,8 +206,8 @@ class EMAModel:
     def load_state_dict(self, state_dict: dict) -> None:
         r"""Loads the ExponentialMovingAverage state. This method is used by accelerate during checkpointing to save the
         ema state dict.
-        
-        Args: 
+
+        Args:
             state_dict (dict): EMA state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
@@ -212,11 +222,15 @@ class EMAModel:
         if not isinstance(self.min_decay, float):
             raise ValueError("Invalid min_decay")
 
-        self.optimization_step = state_dict.get("optimization_step", self.optimization_step)
+        self.optimization_step = state_dict.get(
+            "optimization_step", self.optimization_step
+        )
         if not isinstance(self.optimization_step, int):
             raise ValueError("Invalid optimization_step")
 
-        self.update_after_step = state_dict.get("update_after_step", self.update_after_step)
+        self.update_after_step = state_dict.get(
+            "update_after_step", self.update_after_step
+        )
         if not isinstance(self.update_after_step, int):
             raise ValueError("Invalid update_after_step")
 

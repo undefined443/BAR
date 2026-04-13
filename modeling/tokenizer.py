@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 import json
 from omegaconf import OmegaConf
@@ -40,7 +39,7 @@ class BAR_FSQ(BaseModel):
         dict_config = OmegaConf.to_container(self.config)
         # Save as JSON
         file_path = Path(save_directory) / "config.json"
-        with open(file_path, 'w') as json_file:
+        with open(file_path, "w") as json_file:
             json.dump(dict_config, json_file, indent=4)
         super()._save_pretrained(save_directory)
 
@@ -51,13 +50,17 @@ class BAR_FSQ(BaseModel):
             module: torch.nn.Module to initialize
         """
         if isinstance(module, (nn.Linear, nn.Conv1d, nn.Conv2d)):
-            module.weight.data = nn.init.trunc_normal_(module.weight.data, mean=0.0, std=0.02)
+            module.weight.data = nn.init.trunc_normal_(
+                module.weight.data, mean=0.0, std=0.02
+            )
             if module.bias is not None:
                 module.bias.data.zero_()
         elif isinstance(module, nn.Embedding):
-            module.weight.data = nn.init.trunc_normal_(module.weight.data, mean=0.0, std=0.02)
+            module.weight.data = nn.init.trunc_normal_(
+                module.weight.data, mean=0.0, std=0.02
+            )
         elif isinstance(module, (nn.LayerNorm, RMSNorm)):
-            if hasattr(module, 'bias') and module.bias is not None:
+            if hasattr(module, "bias") and module.bias is not None:
                 module.bias.data.zero_()
             if module.weight is not None:
                 module.weight.data.fill_(1.0)
@@ -102,7 +105,8 @@ class BAR_FSQ(BaseModel):
         tokens = tokens.squeeze(1)
         batch, seq_len = tokens.shape  # B x N
         z_quantized = self.quantize.get_codebook_entry(
-            tokens.reshape(batch, -1)).reshape(batch, -1, self.decoder.width)
+            tokens.reshape(batch, -1)
+        ).reshape(batch, -1, self.decoder.width)
         decoded = self.decode(z_quantized)[0]
         return decoded
 

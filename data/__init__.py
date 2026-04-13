@@ -1,1 +1,4 @@
-from .webdataset_reader import SimpleImageDataset, CachedTokensFolder
+from .webdataset_reader import (
+    CachedTokensFolder as CachedTokensFolder,
+    SimpleImageDataset as SimpleImageDataset,
+)

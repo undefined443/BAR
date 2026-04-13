@@ -21,11 +21,12 @@ class ResBlock(nn.Module):
         self.channels = channels
         self.in_ln = norm_layer(channels)
         # Always use SwiGLU with mlp_ratio=4.0
-        self.mlp = SwiGLUFFN(in_features=channels, hidden_features=int(2/3 * int(channels * 4.0)))
+        self.mlp = SwiGLUFFN(
+            in_features=channels, hidden_features=int(2 / 3 * int(channels * 4.0))
+        )
 
         self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(channels, 3 * channels, bias=True)
+            nn.SiLU(), nn.Linear(channels, 3 * channels, bias=True)
         )
 
     def forward(self, x, attn_mask=None, c=None):
@@ -42,7 +43,9 @@ class GaussianFourierEmbedding(nn.Module):
         super().__init__()
         self.embedding_size = embedding_size
         self.scale = scale
-        self.W = nn.Parameter(torch.normal(0, self.scale, (embedding_size,)), requires_grad=False)
+        self.W = nn.Parameter(
+            torch.normal(0, self.scale, (embedding_size,)), requires_grad=False
+        )
         self.mlp = nn.Sequential(
             nn.Linear(embedding_size * 2, hidden_size, bias=True),
             nn.SiLU(),
@@ -79,20 +82,28 @@ class MaskBitModelingHead(nn.Module):
         norm_layer = RMSNorm
 
         # Input embedding and projection
-        self.input_embed = nn.Embedding(target_codebook_size + 1, math.ceil(self.width / self.seq_len))
-        self.input_proj = nn.Linear(math.ceil(self.width / self.seq_len) * self.seq_len, self.width, bias=True)
+        self.input_embed = nn.Embedding(
+            target_codebook_size + 1, math.ceil(self.width / self.seq_len)
+        )
+        self.input_proj = nn.Linear(
+            math.ceil(self.width / self.seq_len) * self.seq_len, self.width, bias=True
+        )
         self.ln_pre = norm_layer(self.width)
 
         # Transformer blocks with SwiGLU (mlp_ratio=4.0 hardcoded)
         self.transformer = nn.ModuleList()
         for i in range(self.num_layers):
-            self.transformer.append(ResBlock(
-                channels=self.width,
-                norm_layer=norm_layer,
-            ))
+            self.transformer.append(
+                ResBlock(
+                    channels=self.width,
+                    norm_layer=norm_layer,
+                )
+            )
 
         # Output projection
-        self.output_embed = nn.Linear(self.width, self.seq_len * target_codebook_size, bias=True)
+        self.output_embed = nn.Linear(
+            self.width, self.seq_len * target_codebook_size, bias=True
+        )
 
         self.mask_token_id = target_codebook_size
         self.target_codebook_size = target_codebook_size
@@ -105,13 +116,13 @@ class MaskBitModelingHead(nn.Module):
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
-            nn.init.trunc_normal_(m.weight, std=.02)
+            nn.init.trunc_normal_(m.weight, std=0.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.Embedding):
             m.weight.data = nn.init.trunc_normal_(m.weight.data, mean=0.0, std=0.02)
         elif isinstance(m, (nn.LayerNorm, RMSNorm)):
-            if hasattr(m, 'bias') and m.bias is not None:
+            if hasattr(m, "bias") and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
             if m.weight is not None:
                 nn.init.constant_(m.weight, 1.0)
@@ -142,7 +153,7 @@ class MaskBitModelingHead(nn.Module):
             Tensor of mask ratios where 1.0 means fully masked, 0.0 means no mask
         """
         # Direct inversion: t=0 → mask_ratio=1.0, t=1 → mask_ratio=0.0
-        mask_ratio = torch.clamp(1.0 - timesteps, min=1 / self.seq_len, max=1.)
+        mask_ratio = torch.clamp(1.0 - timesteps, min=1 / self.seq_len, max=1.0)
         return mask_ratio
 
     def masking_input_tokens(self, input_tokens):
@@ -155,7 +166,9 @@ class MaskBitModelingHead(nn.Module):
             masked_tokens, masks, mask_ratio
         """
         batch_size, seq_len = input_tokens.shape
-        assert seq_len == self.seq_len, f"Input tokens length {seq_len} does not match expected {self.seq_len}."
+        assert seq_len == self.seq_len, (
+            f"Input tokens length {seq_len} does not match expected {self.seq_len}."
+        )
         device = input_tokens.device
 
         timesteps = self._sample_timesteps(batch_size, device)
@@ -163,7 +176,7 @@ class MaskBitModelingHead(nn.Module):
 
         num_token_masked = (seq_len * mask_ratio).round().clamp(min=1)
         batch_randperm = torch.rand(batch_size, seq_len, device=device).argsort(dim=-1)
-        masks = batch_randperm < rearrange(num_token_masked, 'b -> b 1')
+        masks = batch_randperm < rearrange(num_token_masked, "b -> b 1")
 
         # Always use mask token (not random tokens)
         mask_token_fill = torch.full_like(input_tokens, self.mask_token_id)
@@ -172,7 +185,7 @@ class MaskBitModelingHead(nn.Module):
 
     def forward_fn(self, masked_input_ids, conditions, mask_ratio):
         inputs = self.input_embed(masked_input_ids)
-        inputs = rearrange(inputs, 'b l c -> b (l c)')
+        inputs = rearrange(inputs, "b l c -> b (l c)")
         inputs = self.input_proj(inputs)
 
         t_emb = self.t_embedder(mask_ratio).unsqueeze(1)
@@ -185,7 +198,9 @@ class MaskBitModelingHead(nn.Module):
 
         x = self.adaln_before_head(x, s)
         x = self.output_embed(x)
-        x = rearrange(x, 'b (s c) -> b s c', s=self.seq_len, c=self.target_codebook_size)
+        x = rearrange(
+            x, "b (s c) -> b s c", s=self.seq_len, c=self.target_codebook_size
+        )
         return x
 
     def forward(self, target, conditions):
@@ -199,41 +214,57 @@ class MaskBitModelingHead(nn.Module):
         masked_inputs, masks, mask_ratio = self.masking_input_tokens(target)
         predictions = self.forward_fn(masked_inputs, conditions, mask_ratio)
 
-        with torch.amp.autocast('cuda', enabled=False):
-            loss = self.loss_fn(rearrange(predictions.float(), 'b l c -> b c l'), target)
+        with torch.amp.autocast("cuda", enabled=False):
+            loss = self.loss_fn(
+                rearrange(predictions.float(), "b l c -> b c l"), target
+            )
             masks = masks.to(loss).float()
             # Masked tokens weighted at 1.0, unmasked at 0.1
             loss_weights = (1.0 - masks) * 0.1 + masks
             loss = (loss * loss_weights).sum() / (loss_weights.sum() + 1e-8)
             return loss
 
-
     def _sample_tokens(self, logits, annealed_temp, add_gumbel_noise):
         """Sample tokens from logits with gumbel noise."""
         sampled_ids = add_gumbel_noise(logits, annealed_temp).argmax(dim=-1)
         sampled_logits = torch.squeeze(
-            torch.gather(logits, dim=-1, index=torch.unsqueeze(sampled_ids, -1)), -1)
+            torch.gather(logits, dim=-1, index=torch.unsqueeze(sampled_ids, -1)), -1
+        )
         return sampled_ids, sampled_logits
 
-    def _compute_masking(self, sampled_logits, next_mask_ratio, annealed_temp, add_gumbel_noise,
-                        device, is_mask):
+    def _compute_masking(
+        self,
+        sampled_logits,
+        next_mask_ratio,
+        annealed_temp,
+        add_gumbel_noise,
+        device,
+        is_mask,
+    ):
         """Compute which tokens to mask for next step."""
         # Compute mask length (use round to match training behavior)
         mask_len = torch.Tensor([np.round(self.seq_len * next_mask_ratio)]).to(device)
         # Consider only currently masked positions
         mask_len = torch.maximum(
             torch.Tensor([1]).to(device),
-            torch.minimum(torch.sum(is_mask, dim=-1, keepdims=True) - 1, mask_len)
+            torch.minimum(torch.sum(is_mask, dim=-1, keepdims=True) - 1, mask_len),
         )[0].squeeze()
 
         # Compute confidence and masking threshold
         confidence = add_gumbel_noise(sampled_logits, annealed_temp)
         sorted_confidence, _ = torch.sort(confidence, axis=-1)
-        cut_off = sorted_confidence[:, mask_len.long() - 1:mask_len.long()]
+        cut_off = sorted_confidence[:, mask_len.long() - 1 : mask_len.long()]
         return confidence <= cut_off
 
     @torch.no_grad()
-    def sample(self, conditions, guidance_scale=3.0, randomize_temperature=4.5, tokens_allocation=[4, 4, 4, 4], use_cfg=False):
+    def sample(
+        self,
+        conditions,
+        guidance_scale=3.0,
+        randomize_temperature=4.5,
+        tokens_allocation=[4, 4, 4, 4],
+        use_cfg=False,
+    ):
         """Sample tokens using MBM iterative decoding.
 
         Args:
@@ -272,11 +303,15 @@ class MaskBitModelingHead(nn.Module):
 
         # Validate tokens_allocation
         if not isinstance(tokens_allocation, (list, tuple)):
-            raise ValueError(f"tokens_allocation must be a list or tuple, got {type(tokens_allocation)}")
+            raise ValueError(
+                f"tokens_allocation must be a list or tuple, got {type(tokens_allocation)}"
+            )
         if len(tokens_allocation) == 0:
             raise ValueError("tokens_allocation must have at least one element")
         if any(t <= 0 for t in tokens_allocation):
-            raise ValueError(f"tokens_allocation values must be positive, got {tokens_allocation}")
+            raise ValueError(
+                f"tokens_allocation values must be positive, got {tokens_allocation}"
+            )
         if sum(tokens_allocation) != self.seq_len:
             raise ValueError(
                 f"tokens_allocation must sum to seq_len ({self.seq_len}), "
@@ -284,13 +319,15 @@ class MaskBitModelingHead(nn.Module):
             )
         # Check non-decreasing
         for i in range(len(tokens_allocation) - 1):
-            if tokens_allocation[i+1] < tokens_allocation[i]:
+            if tokens_allocation[i + 1] < tokens_allocation[i]:
                 raise ValueError(
                     f"tokens_allocation must be non-decreasing, but got {tokens_allocation}"
                 )
 
         num_sample_steps = len(tokens_allocation)
-        cumulative_tokens = [0] + [sum(tokens_allocation[:i+1]) for i in range(len(tokens_allocation))]
+        cumulative_tokens = [0] + [
+            sum(tokens_allocation[: i + 1]) for i in range(len(tokens_allocation))
+        ]
 
         # Initialize ids with mask tokens
         ids = torch.full((batch_size, self.seq_len), self.mask_token_id, device=device)
@@ -306,13 +343,17 @@ class MaskBitModelingHead(nn.Module):
             annealed_temp = randomize_temperature * (1.0 - ratio)
 
             # Prepare mask ratio tensor
-            mask_ratio_t = torch.tensor(mask_ratio, dtype=conditions.dtype, device=device)
+            mask_ratio_t = torch.tensor(
+                mask_ratio, dtype=conditions.dtype, device=device
+            )
 
             # Forward pass with or without CFG
             if use_cfg:
                 # Apply CFG: double ids to match doubled conditions
                 mask_ratio_t = mask_ratio_t.view(1).repeat(batch_size * 2)
-                logits = self.forward_fn(torch.cat([ids, ids], dim=0), conditions, mask_ratio_t)
+                logits = self.forward_fn(
+                    torch.cat([ids, ids], dim=0), conditions, mask_ratio_t
+                )
                 # Split and apply CFG
                 cond_logits, uncond_logits = torch.split(logits, batch_size, dim=0)
                 logits = uncond_logits + guidance_scale * (cond_logits - uncond_logits)
@@ -321,10 +362,12 @@ class MaskBitModelingHead(nn.Module):
                 logits = self.forward_fn(ids, conditions, mask_ratio_t)
 
             # Sample tokens
-            sampled_ids, sampled_logits = self._sample_tokens(logits, annealed_temp, add_gumbel_noise)
+            sampled_ids, sampled_logits = self._sample_tokens(
+                logits, annealed_temp, add_gumbel_noise
+            )
 
             # Only update masked positions
-            is_mask = (ids == self.mask_token_id)
+            is_mask = ids == self.mask_token_id
             sampled_ids = torch.where(is_mask, sampled_ids, ids)
             sampled_logits = torch.where(is_mask, sampled_logits, +np.inf).float()
 
@@ -334,11 +377,13 @@ class MaskBitModelingHead(nn.Module):
             else:
                 # Compute masking for next step
                 masking = self._compute_masking(
-                    sampled_logits, next_mask_ratio, annealed_temp, add_gumbel_noise,
-                    device, is_mask
+                    sampled_logits,
+                    next_mask_ratio,
+                    annealed_temp,
+                    add_gumbel_noise,
+                    device,
+                    is_mask,
                 )
                 ids = torch.where(masking, self.mask_token_id, sampled_ids)
 
         return ids
-
-

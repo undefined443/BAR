@@ -1,1 +1,1 @@
-from .evaluator import VQGANEvaluator
+from .evaluator import VQGANEvaluator as VQGANEvaluator

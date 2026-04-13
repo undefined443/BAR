@@ -3,13 +3,13 @@
 Reference:
     https://github.com/CompVis/taming-transformers/blob/master/taming/modules/losses/vqperceptual.py
 """
+
 from typing import Mapping, Text, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
-from torch.amp import autocast
 from .perceptual_loss import PerceptualLoss
 from .discriminator_dino import DinoDisc
 
@@ -21,8 +21,12 @@ class GramLoss(nn.Module):
         vgg16 = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1)
         self.feature_extractor = vgg16.features.eval()
 
-        self.register_buffer("imagenet_mean", torch.Tensor([0.485, 0.456, 0.406])[None, :, None, None])
-        self.register_buffer("imagenet_std", torch.Tensor([0.229, 0.224, 0.225])[None, :, None, None])
+        self.register_buffer(
+            "imagenet_mean", torch.Tensor([0.485, 0.456, 0.406])[None, :, None, None]
+        )
+        self.register_buffer(
+            "imagenet_std", torch.Tensor([0.229, 0.224, 0.225])[None, :, None, None]
+        )
 
         for param in self.parameters():
             param.requires_grad = False
@@ -39,7 +43,11 @@ class GramLoss(nn.Module):
         G = F_flat @ F_flat.transpose(1, 2)  # [N, C, C]
         return G / (C * H * W)  # normalize
 
-    def forward(self, input: torch.Tensor, target: torch.Tensor,):
+    def forward(
+        self,
+        input: torch.Tensor,
+        target: torch.Tensor,
+    ):
         """Computes the perceptual loss.
 
         Args:
@@ -53,8 +61,12 @@ class GramLoss(nn.Module):
         self.feature_extractor.eval()
         # [-1, 1] -> [0, 1]
 
-        input_img = F.interpolate(input, size=(224, 224), mode="bilinear", align_corners=False)
-        target_img = F.interpolate(target, size=(224, 224), mode="bilinear", align_corners=False)
+        input_img = F.interpolate(
+            input, size=(224, 224), mode="bilinear", align_corners=False
+        )
+        target_img = F.interpolate(
+            target, size=(224, 224), mode="bilinear", align_corners=False
+        )
 
         input_imgs = (input_img + 1.0) / 2.0
         target_imgs = (target_img + 1.0) / 2.0
@@ -108,8 +120,7 @@ class ReconstructionLoss(torch.nn.Module):
 
         self.reconstruction_weight_l1 = loss_config.reconstruction_weight_l1
         self.reconstruction_weight_l2 = loss_config.reconstruction_weight_l2
-        self.perceptual_loss = PerceptualLoss(
-            loss_config.perceptual_loss).eval()
+        self.perceptual_loss = PerceptualLoss(loss_config.perceptual_loss).eval()
         self.perceptual_weight = loss_config.perceptual_weight
         self.discriminator_iter_start = loss_config.discriminator_start
         self.discriminator_factor = loss_config.discriminator_factor
@@ -121,9 +132,13 @@ class ReconstructionLoss(torch.nn.Module):
         if self.use_discriminator:
             # Only use DinoDisc as discriminator
             # Download from: https://huggingface.co/nyu-visionx/RAE-collections/blob/main/discs/dino_vit_small_patch8_224.pth
-            dino_ckpt_path = disc_config.get("dino_ckpt_path", "assets/models/dino_vit_small_patch8_224.pth")
+            dino_ckpt_path = disc_config.get(
+                "dino_ckpt_path", "assets/models/dino_vit_small_patch8_224.pth"
+            )
             norm_type = disc_config.get("norm_type", "bn")
-            self.discriminator = DinoDisc(dino_ckpt_path=dino_ckpt_path, norm_type=norm_type)
+            self.discriminator = DinoDisc(
+                dino_ckpt_path=dino_ckpt_path, norm_type=norm_type
+            )
         else:
             print("Discriminator is disabled (discriminator_weight = 0)")
             self.discriminator = None
@@ -136,7 +151,6 @@ class ReconstructionLoss(torch.nn.Module):
         else:
             self.gram_loss = None
 
-
         self.config = config
 
         # CLIP loss: frozen CLIP features are now computed in the encoder and passed via result_dict
@@ -146,44 +160,54 @@ class ReconstructionLoss(torch.nn.Module):
         # Discriminator-related methods use @torch._dynamo.disable to exclude them from compilation
 
     # @torch.amp.autocast(device_type='cuda', enabled=False)
-    def forward(self,
-                inputs: torch.Tensor,
-                reconstructions: torch.Tensor,
-                extra_result_dict: Mapping[Text, torch.Tensor],
-                global_step: int,
-                mode: str = "generator",
-                ) -> Tuple[torch.Tensor, Mapping[Text, torch.Tensor]]:
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        reconstructions: torch.Tensor,
+        extra_result_dict: Mapping[Text, torch.Tensor],
+        global_step: int,
+        mode: str = "generator",
+    ) -> Tuple[torch.Tensor, Mapping[Text, torch.Tensor]]:
         # Both inputs and reconstructions are in range [-1, 1].
         # inputs = inputs.float()
         # reconstructions = reconstructions.float()
 
         if mode == "generator":
-            return self._forward_generator(inputs, reconstructions, extra_result_dict, global_step)
+            return self._forward_generator(
+                inputs, reconstructions, extra_result_dict, global_step
+            )
         elif mode == "discriminator":
             return self._forward_discriminator(inputs, reconstructions, global_step)
         else:
             raise ValueError(f"Unsupported mode {mode}")
-   
-    def should_discriminator_be_trained(self, global_step : int):
+
+    def should_discriminator_be_trained(self, global_step: int):
         return self.use_discriminator and global_step >= self.discriminator_iter_start
 
-    def _forward_generator(self,
-                           inputs: torch.Tensor,
-                           reconstructions: torch.Tensor,
-                           extra_result_dict: Mapping[Text, torch.Tensor],
-                           global_step: int,
-                           ) -> Tuple[torch.Tensor, Mapping[Text, torch.Tensor]]:
+    def _forward_generator(
+        self,
+        inputs: torch.Tensor,
+        reconstructions: torch.Tensor,
+        extra_result_dict: Mapping[Text, torch.Tensor],
+        global_step: int,
+    ) -> Tuple[torch.Tensor, Mapping[Text, torch.Tensor]]:
         """Generator training step."""
         inputs = inputs.contiguous()
         reconstructions = reconstructions.contiguous()
         # We always ensure the images are normalized to [-1, 1]
 
-        reconstruction_loss = 0.
+        reconstruction_loss = 0.0
 
         if self.reconstruction_weight_l1 > 0:
-            reconstruction_loss += F.l1_loss(inputs, reconstructions, reduction="mean") * self.reconstruction_weight_l1
+            reconstruction_loss += (
+                F.l1_loss(inputs, reconstructions, reduction="mean")
+                * self.reconstruction_weight_l1
+            )
         if self.reconstruction_weight_l2 > 0:
-            reconstruction_loss += F.mse_loss(inputs, reconstructions, reduction="mean") * self.reconstruction_weight_l2
+            reconstruction_loss += (
+                F.mse_loss(inputs, reconstructions, reduction="mean")
+                * self.reconstruction_weight_l2
+            )
 
         # Compute perceptual loss.
         perceptual_loss = self.perceptual_loss(inputs, reconstructions).mean()
@@ -199,14 +223,16 @@ class ReconstructionLoss(torch.nn.Module):
         # Compute Gram loss
         gram_loss = torch.zeros((), device=inputs.device)
         generator_loss = torch.zeros((), device=reconstructions.device)
-        discriminator_factor = 0.
-        d_weight = 0.
+        discriminator_factor = 0.0
+        d_weight = 0.0
         if self.gram_loss_weight > 0:
             gram_loss = self.gram_loss(inputs, reconstructions)
-        
+
         if self.use_discriminator:
             # Compute discriminator loss.
-            generator_loss, d_weight, discriminator_factor = self._compute_generator_loss(reconstructions, global_step)
+            generator_loss, d_weight, discriminator_factor = (
+                self._compute_generator_loss(reconstructions, global_step)
+            )
 
         total_loss = (
             reconstruction_loss
@@ -219,7 +245,9 @@ class ReconstructionLoss(torch.nn.Module):
             total_loss=total_loss.clone().detach(),
             reconstruction_loss=reconstruction_loss.detach(),
             perceptual_loss=(self.perceptual_weight * perceptual_loss).detach(),
-            weighted_gan_loss=(d_weight * discriminator_factor * generator_loss).detach(),
+            weighted_gan_loss=(
+                d_weight * discriminator_factor * generator_loss
+            ).detach(),
             discriminator_factor=discriminator_factor,
             clip_loss=(self.clip_loss_weight * clip_loss).detach(),
             gram_loss=(self.gram_loss_weight * gram_loss).detach(),
@@ -234,10 +262,18 @@ class ReconstructionLoss(torch.nn.Module):
         """Compute generator adversarial loss."""
         # Compute discriminator loss.
         generator_loss = torch.zeros((), device=reconstructions.device)
-        discriminator_factor = self.discriminator_factor if self.should_discriminator_be_trained(global_step) else 0
+        discriminator_factor = (
+            self.discriminator_factor
+            if self.should_discriminator_be_trained(global_step)
+            else 0
+        )
         d_weight = 1.0
         d_weight *= self.discriminator_weight
-        if discriminator_factor > 0.0 and self.discriminator_weight > 0.0 and self.discriminator is not None:
+        if (
+            discriminator_factor > 0.0
+            and self.discriminator_weight > 0.0
+            and self.discriminator is not None
+        ):
             # Disable discriminator gradients.
             for param in self.discriminator.parameters():
                 param.requires_grad = False
@@ -246,11 +282,12 @@ class ReconstructionLoss(torch.nn.Module):
         return generator_loss, d_weight, discriminator_factor
 
     @torch._dynamo.disable
-    def _forward_discriminator(self,
-                               inputs: torch.Tensor,
-                               reconstructions: torch.Tensor,
-                               global_step: int,
-                               ) -> Tuple[torch.Tensor, Mapping[Text, torch.Tensor]]:
+    def _forward_discriminator(
+        self,
+        inputs: torch.Tensor,
+        reconstructions: torch.Tensor,
+        global_step: int,
+    ) -> Tuple[torch.Tensor, Mapping[Text, torch.Tensor]]:
         """Discrminator training step."""
         # Skip discriminator training if using gram loss
         if self.discriminator is None:
@@ -262,7 +299,11 @@ class ReconstructionLoss(torch.nn.Module):
             )
             return discriminator_loss, loss_dict
 
-        discriminator_factor = self.discriminator_factor if self.should_discriminator_be_trained(global_step) else 0
+        discriminator_factor = (
+            self.discriminator_factor
+            if self.should_discriminator_be_trained(global_step)
+            else 0
+        )
         loss_dict = {}
         # Turn the gradients on.
         for param in self.discriminator.parameters():
@@ -276,7 +317,9 @@ class ReconstructionLoss(torch.nn.Module):
 
         logits_real = self.discriminator(real_images)
         logits_fake = self.discriminator(reconstructions.detach())
-        discriminator_loss = discriminator_factor * hinge_d_loss(logits_real=logits_real, logits_fake=logits_fake)
+        discriminator_loss = discriminator_factor * hinge_d_loss(
+            logits_real=logits_real, logits_fake=logits_fake
+        )
 
         loss_dict = dict(
             discriminator_loss=discriminator_loss.detach(),

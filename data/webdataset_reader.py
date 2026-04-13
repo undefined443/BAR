@@ -22,13 +22,15 @@ def filter_keys(key_set):
 
 
 class ImageTransform:
-    def __init__(self,
-                 resize_shorter_edge: int = 256,
-                 crop_size: int = 256,
-                 random_crop: bool = True,
-                 random_flip: bool = True,
-                 normalize_mean: List[float] = [0.5, 0.5, 0.5],
-                 normalize_std: List[float] = [0.5, 0.5, 0.5]):
+    def __init__(
+        self,
+        resize_shorter_edge: int = 256,
+        crop_size: int = 256,
+        random_crop: bool = True,
+        random_flip: bool = True,
+        normalize_mean: List[float] = [0.5, 0.5, 0.5],
+        normalize_std: List[float] = [0.5, 0.5, 0.5],
+    ):
         """Initializes the WebDatasetReader with specified augmentation parameters.
 
         Args:
@@ -39,7 +41,7 @@ class ImageTransform:
             interpolation: A string, the interpolation mode to be used. Supported values are "bicubic" and "bilinear".
             normalize_mean: A list of float, the normalization mean used to normalize the image tensor.
             normalize_std: A list of float, the normalization std used to normalize the image tensor.
-        
+
         Raises:
             NotImplementedError: If the interpolation mode is not one of ["bicubic", "bilinear"].
         """
@@ -47,7 +49,10 @@ class ImageTransform:
         interpolation = transforms.InterpolationMode.BICUBIC
 
         train_transform.append(
-            transforms.Resize(resize_shorter_edge, interpolation=interpolation, antialias=True))
+            transforms.Resize(
+                resize_shorter_edge, interpolation=interpolation, antialias=True
+            )
+        )
         if random_crop:
             train_transform.append(transforms.RandomCrop(crop_size))
         else:
@@ -64,10 +69,12 @@ class ImageTransform:
             [
                 # Note that we always resize to crop_size during eval to ensure the results
                 # can be compared against reference numbers on ImageNet etc.
-                transforms.Resize(crop_size, interpolation=interpolation, antialias=True),
+                transforms.Resize(
+                    crop_size, interpolation=interpolation, antialias=True
+                ),
                 transforms.CenterCrop(crop_size),
                 transforms.ToTensor(),
-                transforms.Normalize(normalize_mean, normalize_std)
+                transforms.Normalize(normalize_mean, normalize_std),
             ]
         )
         print(f"self.train_transform: {self.train_transform}")
@@ -85,8 +92,8 @@ class SimpleImageDataset:
         num_workers_per_gpu: int,
         resize_shorter_edge: int = 256,
         crop_size: int = 256,
-        random_crop = True,
-        random_flip = True,
+        random_crop=True,
+        random_flip=True,
         normalize_mean: List[float] = [0.5, 0.5, 0.5],
         normalize_std: List[float] = [0.5, 0.5, 0.5],
         dataset_with_class_label: bool = True,
@@ -110,17 +117,26 @@ class SimpleImageDataset:
             dataset_with_class_label: A boolean, whether using the training data contains class labels (e.g., ImageNet).
         """
         transform = ImageTransform(
-            resize_shorter_edge, crop_size, random_crop, random_flip,
-            normalize_mean, normalize_std)
+            resize_shorter_edge,
+            crop_size,
+            random_crop,
+            random_flip,
+            normalize_mean,
+            normalize_std,
+        )
 
         if dataset_with_class_label:
             train_processing_pipeline = [
-                wds.decode(wds.autodecode.ImageHandler("pil", extensions=["webp", "png", "jpg", "jpeg"])),
+                wds.decode(
+                    wds.autodecode.ImageHandler(
+                        "pil", extensions=["webp", "png", "jpg", "jpeg"]
+                    )
+                ),
                 wds.rename(
                     image="jpg;png;jpeg;webp",
                     class_id="cls",
                     handler=wds.warn_and_continue,
-                    ),
+                ),
                 wds.map(filter_keys(set(["image", "class_id", "filename"]))),
                 wds.map_dict(
                     image=transform.train_transform,
@@ -131,11 +147,15 @@ class SimpleImageDataset:
         else:
             # The tar file format of openimages is slightly different, due to missing "class_id".
             train_processing_pipeline = [
-                wds.decode(wds.autodecode.ImageHandler("pil", extensions=["webp", "png", "jpg", "jpeg"])),
+                wds.decode(
+                    wds.autodecode.ImageHandler(
+                        "pil", extensions=["webp", "png", "jpg", "jpeg"]
+                    )
+                ),
                 wds.rename(
                     image="jpg;png;jpeg;webp",
                     handler=wds.warn_and_continue,
-                    ),
+                ),
                 wds.map(filter_keys(set(["image", "txt"]))),
                 wds.map_dict(
                     image=transform.train_transform,
@@ -144,12 +164,16 @@ class SimpleImageDataset:
             ]
 
         test_processing_pipeline = [
-            wds.decode(wds.autodecode.ImageHandler("pil", extensions=["webp", "png", "jpg", "jpeg"])),
+            wds.decode(
+                wds.autodecode.ImageHandler(
+                    "pil", extensions=["webp", "png", "jpg", "jpeg"]
+                )
+            ),
             wds.rename(
                 image="jpg;png;jpeg;webp",
                 class_id="cls",
                 handler=wds.warn_and_continue,
-                ),
+            ),
             wds.map(filter_keys(set(["image", "class_id", "filename"]))),
             wds.map_dict(
                 image=transform.eval_transform,
@@ -162,15 +186,17 @@ class SimpleImageDataset:
         pipeline = [
             wds.ResampledShards(train_shards_path),
             wds.tarfile_to_samples(handler=wds.warn_and_continue),
-            wds.shuffle(bufsize=5000,
-                        initial=1000),
+            wds.shuffle(bufsize=5000, initial=1000),
             *train_processing_pipeline,
-            wds.batched(per_gpu_batch_size, partial=False, collation_fn=default_collate),
+            wds.batched(
+                per_gpu_batch_size, partial=False, collation_fn=default_collate
+            ),
         ]
 
         num_batches = math.ceil(num_train_examples / global_batch_size)
-        num_worker_batches = math.ceil(num_train_examples / 
-            (global_batch_size * num_workers_per_gpu))
+        num_worker_batches = math.ceil(
+            num_train_examples / (global_batch_size * num_workers_per_gpu)
+        )
         num_batches = num_worker_batches * num_workers_per_gpu
         num_samples = num_batches * global_batch_size
 
@@ -258,7 +284,7 @@ class CachedTokensFolder(datasets.DatasetFolder):
         super().__init__(
             root,
             loader=self._load_npz,
-            extensions=('.npz',),
+            extensions=(".npz",),
             transform=transform,
             target_transform=target_transform,
         )
@@ -277,9 +303,9 @@ class CachedTokensFolder(datasets.DatasetFolder):
 
         # Randomly select between original and flipped (50% chance each)
         if torch.rand(1).item() < 0.5:
-            tokens = data['tokens']
+            tokens = data["tokens"]
         else:
-            tokens = data['tokens_flip']
+            tokens = data["tokens_flip"]
 
         return tokens
 
@@ -300,7 +326,7 @@ class CachedTokensFolder(datasets.DatasetFolder):
 
         # Convert to torch tensor and proper dtype
         # NPZ may contain bool/uint8/uint16, convert to long for model input
-        tokens = torch.from_numpy(tokens.astype('int64'))
+        tokens = torch.from_numpy(tokens.astype("int64"))
 
         if self.transform is not None:
             tokens = self.transform(tokens)

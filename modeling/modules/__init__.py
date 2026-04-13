@@ -1,5 +1,5 @@
-from .base_model import BaseModel
-from .ema_model import EMAModel
-from .lpips import LPIPS
-from .losses import ReconstructionLoss
-from .blocks import SigLIP2Encoder, SigLIP2Decoder
+from .base_model import BaseModel as BaseModel
+from .blocks import SigLIP2Decoder as SigLIP2Decoder, SigLIP2Encoder as SigLIP2Encoder
+from .ema_model import EMAModel as EMAModel
+from .lpips import LPIPS as LPIPS
+from .losses import ReconstructionLoss as ReconstructionLoss

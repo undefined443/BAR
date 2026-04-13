@@ -1,6 +1,6 @@
 """This file contains perceptual loss module using LPIPS or ConvNeXt-S."""
+
 import torch
-import torch.nn.functional as F
 
 from torchvision import models
 from .lpips import LPIPS
@@ -8,7 +8,7 @@ from .lpips import LPIPS
 _IMAGENET_MEAN = [0.485, 0.456, 0.406]
 _IMAGENET_STD = [0.229, 0.224, 0.225]
 
- 
+
 class PerceptualLoss(torch.nn.Module):
     def __init__(self, model_name: str = "lpips"):
         """Initializes the PerceptualLoss class.
@@ -20,8 +20,7 @@ class PerceptualLoss(torch.nn.Module):
             ValueError: If the model_name does not contain "lpips" or "convnext_s".
         """
         super().__init__()
-        if ("lpips" not in model_name) and (
-            "convnext_s" not in model_name):
+        if ("lpips" not in model_name) and ("convnext_s" not in model_name):
             raise ValueError(f"Unsupported Perceptual Loss model name {model_name}")
         self.lpips = None
         self.convnext = None
@@ -29,7 +28,7 @@ class PerceptualLoss(torch.nn.Module):
         self.loss_weight_convnext = None
 
         # Parsing the model name. We support name formatted in
-        # "lpips-convnext_s-{float_number}-{float_number}", where the 
+        # "lpips-convnext_s-{float_number}-{float_number}", where the
         # {float_number} refers to the loss weight for each component.
         # E.g., lpips-convnext_s-1.0-2.0 refers to compute the perceptual loss
         # using both the convnext_s and lpips, and average the final loss with
@@ -38,19 +37,30 @@ class PerceptualLoss(torch.nn.Module):
             self.lpips = LPIPS().eval()
 
         if "convnext_s" in model_name:
-            self.convnext = models.convnext_small(weights=models.ConvNeXt_Small_Weights.IMAGENET1K_V1).eval()
+            self.convnext = models.convnext_small(
+                weights=models.ConvNeXt_Small_Weights.IMAGENET1K_V1
+            ).eval()
 
         if "lpips" in model_name and "convnext_s" in model_name:
-            loss_config = model_name.split('-')[-2:]
-            self.loss_weight_lpips, self.loss_weight_convnext = float(loss_config[0]), float(loss_config[1])
-            print(f"self.loss_weight_lpips, self.loss_weight_convnext: {self.loss_weight_lpips}, {self.loss_weight_convnext}")
- 
-        self.register_buffer("imagenet_mean", torch.Tensor(_IMAGENET_MEAN)[None, :, None, None])
-        self.register_buffer("imagenet_std", torch.Tensor(_IMAGENET_STD)[None, :, None, None])
+            loss_config = model_name.split("-")[-2:]
+            self.loss_weight_lpips, self.loss_weight_convnext = (
+                float(loss_config[0]),
+                float(loss_config[1]),
+            )
+            print(
+                f"self.loss_weight_lpips, self.loss_weight_convnext: {self.loss_weight_lpips}, {self.loss_weight_convnext}"
+            )
+
+        self.register_buffer(
+            "imagenet_mean", torch.Tensor(_IMAGENET_MEAN)[None, :, None, None]
+        )
+        self.register_buffer(
+            "imagenet_std", torch.Tensor(_IMAGENET_STD)[None, :, None, None]
+        )
 
         for param in self.parameters():
             param.requires_grad = False
-    
+
     def forward(self, input: torch.Tensor, target: torch.Tensor):
         """Computes the perceptual loss.
 
@@ -63,8 +73,8 @@ class PerceptualLoss(torch.nn.Module):
         """
         # Always in eval mode.
         self.eval()
-        loss = 0.
-        num_losses = 0.
+        loss = 0.0
+        num_losses = 0.0
         # Computes LPIPS loss, if available.
         if self.lpips is not None:
             lpips_loss = self.lpips(input, target)
@@ -77,20 +87,27 @@ class PerceptualLoss(torch.nn.Module):
 
         if self.convnext is not None:
             # Computes ConvNeXt-s loss, if available.
-            pred_input = torch.nn.functional.interpolate(input, size=224, mode="bicubic", align_corners=False, antialias=True)
-            pred_target = torch.nn.functional.interpolate(target, size=224, mode="bicubic", align_corners=False, antialias=True)
+            pred_input = torch.nn.functional.interpolate(
+                input, size=224, mode="bicubic", align_corners=False, antialias=True
+            )
+            pred_target = torch.nn.functional.interpolate(
+                target, size=224, mode="bicubic", align_corners=False, antialias=True
+            )
 
             # shift from [-1, 1] to [0, 1]
-            pred_input = (pred_input + 1.) / 2.
-            pred_target = (pred_target + 1.) / 2.
+            pred_input = (pred_input + 1.0) / 2.0
+            pred_target = (pred_target + 1.0) / 2.0
 
-            pred_input = self.convnext((pred_input - self.imagenet_mean) / self.imagenet_std)
-            pred_target = self.convnext((pred_target - self.imagenet_mean) / self.imagenet_std)
+            pred_input = self.convnext(
+                (pred_input - self.imagenet_mean) / self.imagenet_std
+            )
+            pred_target = self.convnext(
+                (pred_target - self.imagenet_mean) / self.imagenet_std
+            )
             convnext_loss = torch.nn.functional.mse_loss(
-                pred_input,
-                pred_target,
-                reduction="mean")
-                
+                pred_input, pred_target, reduction="mean"
+            )
+
             if self.loss_weight_convnext is None:
                 num_losses += 1
                 loss += convnext_loss

@@ -1,4 +1,4 @@
-"""LPIPS model, this file is a stripped version which is borrowed from 
+"""LPIPS model, this file is a stripped version which is borrowed from
 https://github.com/richzhang/PerceptualSimilarity/tree/master/models
 
 We modified the LPIPS.forward with another scaling/shifting the input tensor
@@ -6,7 +6,6 @@ from [0, 1] to [-1, 1]. Because our code-base defaults to normalizing image
 to [0, 1] while LPIPS expects an input normalized to [-1, 1].
 """
 
-import os
 from collections import namedtuple
 
 import torch
@@ -16,6 +15,7 @@ from torchvision import models
 
 _LPIPS_MEAN = [-0.030, -0.088, -0.188]
 _LPIPS_STD = [0.458, 0.448, 0.450]
+
 
 class LPIPS(nn.Module):
     # Learned perceptual metric.
@@ -35,7 +35,9 @@ class LPIPS(nn.Module):
 
     def load_pretrained(self):
         VGG_PATH = "assets/models/vgg_lpips.pth"
-        self.load_state_dict(torch.load(VGG_PATH, map_location=torch.device("cpu")), strict=False)
+        self.load_state_dict(
+            torch.load(VGG_PATH, map_location=torch.device("cpu")), strict=False
+        )
 
     def forward(self, input, target):
         # Notably, the LPIPS w/ pre-trained weights expect the input in the range of [-1, 1].
@@ -44,13 +46,19 @@ class LPIPS(nn.Module):
         feats0, feats1, diffs = {}, {}, {}
         lins = [self.lin0, self.lin1, self.lin2, self.lin3, self.lin4]
         for kk in range(len(self.chns)):
-            feats0[kk], feats1[kk] = normalize_tensor(outs0[kk]), normalize_tensor(outs1[kk])
+            feats0[kk], feats1[kk] = (
+                normalize_tensor(outs0[kk]),
+                normalize_tensor(outs1[kk]),
+            )
             diffs[kk] = (feats0[kk] - feats1[kk]) ** 2
 
-        res = [spatial_average(lins[kk].model(diffs[kk]), keepdim=True) for kk in range(len(self.chns))]
+        res = [
+            spatial_average(lins[kk].model(diffs[kk]), keepdim=True)
+            for kk in range(len(self.chns))
+        ]
         val = res[0]
-        for l in range(1, len(self.chns)):
-            val += res[l]
+        for idx in range(1, len(self.chns)):
+            val += res[idx]
         return val
 
 
@@ -85,7 +93,9 @@ class NetLinLayer(nn.Module):
 class vgg16(torch.nn.Module):
     def __init__(self, requires_grad=False, pretrained=True):
         super(vgg16, self).__init__()
-        vgg_pretrained_features = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1).features
+        vgg_pretrained_features = models.vgg16(
+            weights=models.VGG16_Weights.IMAGENET1K_V1
+        ).features
         self.slice1 = torch.nn.Sequential()
         self.slice2 = torch.nn.Sequential()
         self.slice3 = torch.nn.Sequential()
@@ -117,7 +127,9 @@ class vgg16(torch.nn.Module):
         h_relu4_3 = h
         h = self.slice5(h)
         h_relu5_3 = h
-        vgg_outputs = namedtuple("VggOutputs", ["relu1_2", "relu2_2", "relu3_3", "relu4_3", "relu5_3"])
+        vgg_outputs = namedtuple(
+            "VggOutputs", ["relu1_2", "relu2_2", "relu3_3", "relu4_3", "relu5_3"]
+        )
         out = vgg_outputs(h_relu1_2, h_relu2_2, h_relu3_3, h_relu4_3, h_relu5_3)
         return out
 
