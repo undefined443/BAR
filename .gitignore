@@ -1,10 +1,22 @@
-.worktree
-assets
-bar_*
+# Python
 __pycache__
+*.log
+.python-version
+
+# Virtual environment
+.venv
+
+# Package management
+uv.lock
+
+# IDE & Tools
+.ruff_cache
+
+# Project-specific
+.worktree
+.env
+assets
+bar_*/
 pretokenized_npz*
 ImageNet-1K-wds
-uv.lock
 wandb
-.python-version
-*.log
