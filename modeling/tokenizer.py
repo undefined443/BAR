@@ -62,9 +62,13 @@ class CLIPTextTokenizer:
             token_bits = self.token_ids_to_bits(token_ids)
 
             # Get embeddings from CLIP
-            processed_images = self.image_processor(images, return_tensors="pt")["pixel_values"].to(self.device)
+            processed_images = self.image_processor(images, return_tensors="pt")[
+                "pixel_values"
+            ].to(self.device)
             outputs = self.model.vision_model(pixel_values=processed_images)
-            image_embeddings = self.model.visual_projection(outputs.pooler_output)  # [batch_size, 768]
+            image_embeddings = self.model.visual_projection(
+                outputs.pooler_output
+            )  # [batch_size, 768]
 
         return token_bits, image_embeddings
 

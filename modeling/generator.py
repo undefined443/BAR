@@ -115,9 +115,7 @@ class BAR(BaseModel):
         self.embeddings = nn.Linear(768, embed_dim)
 
         # Learnable unconditional/dropped condition embedding for classifier-free guidance
-        self.none_condition_embedding = nn.Parameter(
-            torch.randn(1, embed_dim) * 0.02
-        )
+        self.none_condition_embedding = nn.Parameter(torch.randn(1, embed_dim) * 0.02)
 
         # Efficient input embedding: per-channel then merge
         self.input_embeddings = nn.Embedding(

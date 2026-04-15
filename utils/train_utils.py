@@ -66,7 +66,9 @@ def get_pretrained_tokenizer(config):
         Loaded CLIPTextTokenizer in eval mode with gradients disabled.
     """
     # Load CLIP text tokenizer
-    clip_model_name = getattr(config.experiment, "clip_model_name", "openai/clip-vit-large-patch14")
+    clip_model_name = getattr(
+        config.experiment, "clip_model_name", "openai/clip-vit-large-patch14"
+    )
     tokenizer = CLIPTextTokenizer(model_name=clip_model_name)
     tokenizer.eval()
 
