@@ -1,126 +1,102 @@
-import torch.nn as nn
-import json
-from omegaconf import OmegaConf
-from pathlib import Path
+"""CLIP text tokenizer for text diffusion models."""
 
-from .modules import BaseModel, SigLIP2Encoder, SigLIP2Decoder
-from .modules.blocks import RMSNorm
-from .quantizer import FSQ
+import torch
 
 
-class BAR_FSQ(BaseModel):
-    def __init__(self, config):
+class CLIPTextTokenizer:
+    """Wrapper for CLIP text tokenizer for text diffusion models."""
 
-        if isinstance(config, dict):
-            config = OmegaConf.create(config)
-
-        super().__init__()
-        self.config = config
-
-        # Initialize decoder first, then apply weight initialization
-        self.decoder = SigLIP2Decoder(config)
-        self.apply(self._init_weights)
-
-        # Load encoder after weight initialization to preserve pretrained weights
-        self.encoder = SigLIP2Encoder(config)
-
-        # Only use FSQ quantizer
-        self.quantize = FSQ(
-            in_channel=self.encoder.width,
-            out_channel=self.decoder.width,
-            token_size=config.model.vq_model.token_size,
-            config=config,
-        )
-
-    def _save_pretrained(self, save_directory: Path) -> None:
-        """Save weights and config to a local directory."""
-        # Assume 'self.config' is your DictConfig object
-        # Convert to a regular dictionary
-        dict_config = OmegaConf.to_container(self.config)
-        # Save as JSON
-        file_path = Path(save_directory) / "config.json"
-        with open(file_path, "w") as json_file:
-            json.dump(dict_config, json_file, indent=4)
-        super()._save_pretrained(save_directory)
-
-    def _init_weights(self, module):
-        """Initialize the weights.
+    def __init__(self, model_name="jinaai/jina-clip-v2"):
+        """Initialize CLIP text tokenizer.
 
         Args:
-            module: torch.nn.Module to initialize
+            model_name: HuggingFace model name for CLIP.
         """
-        if isinstance(module, (nn.Linear, nn.Conv1d, nn.Conv2d)):
-            module.weight.data = nn.init.trunc_normal_(
-                module.weight.data, mean=0.0, std=0.02
+        from transformers import CLIPTokenizer, CLIPModel, CLIPImageProcessor
+
+        self.tokenizer = CLIPTokenizer.from_pretrained(model_name)
+        self.model = CLIPModel.from_pretrained(model_name)
+        self.image_processor = CLIPImageProcessor.from_pretrained(model_name)
+        self.device = torch.device("cuda")
+        self.model.eval()
+
+    def to(self, device):
+        """Move model to device."""
+        self.device = device
+        self.model = self.model.to(device)
+        return self
+
+    def train(self):
+        """Set model to train mode (no-op for text tokenizer)."""
+        return self
+
+    def eval(self):
+        """Set model to eval mode."""
+        self.model.eval()
+        return self
+
+    def encode(self, texts, images):
+        """Encode texts to binary bits and images to embeddings.
+
+        Args:
+            texts: List of text strings or single text string.
+            images: List of image tensors or single image tensor.
+
+        Returns:
+            Tuple of (text_token_bits, image_embeddings).
+            text_token_bits: (B, L, token_size) binary representation of token IDs
+        """
+        if isinstance(texts, str):
+            texts = [texts]
+
+        # Tokenize texts
+        with torch.no_grad():
+            inputs = self.tokenizer(
+                texts,
+                padding="max_length",
+                max_length=77,
+                return_tensors="pt",
+                truncation=True,
             )
-            if module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.Embedding):
-            module.weight.data = nn.init.trunc_normal_(
-                module.weight.data, mean=0.0, std=0.02
-            )
-        elif isinstance(module, (nn.LayerNorm, RMSNorm)):
-            if hasattr(module, "bias") and module.bias is not None:
-                module.bias.data.zero_()
-            if module.weight is not None:
-                module.weight.data.fill_(1.0)
+            token_ids = inputs["input_ids"].to(self.device)
+            token_bits = self.token_ids_to_bits(token_ids)
 
-    def encode(self, x):
-        """Encode images to quantized tokens.
+            # Get embeddings from CLIP
+            processed_images = self.image_processor(images, return_tensors="pt")["pixel_values"].to(self.device)
+            outputs = self.model.vision_model(pixel_values=processed_images)
+            image_embeddings = self.model.visual_projection(outputs.pooler_output)  # [batch_size, 768]
 
-        Args:
-            x: Input images (B, 3, H, W)
+        return token_bits, image_embeddings
 
-        Returns:
-            z_quantized: Quantized tokens (B, N, C)
-            result_dict: Dictionary containing quantization results and clip_gt
-        """
-        z, clip_gt = self.encoder(pixel_values=x, return_clip_gt=True)
-        z_quantized, result_dict = self.quantize(z)
-        result_dict["clip_gt"] = clip_gt
-        return z_quantized, result_dict
+    def token_ids_to_bits(self, token_ids, token_size=16):
+        """Convert token IDs to binary bits.
 
-    def decode(self, z_quantized):
-        """Decode quantized tokens to images.
+        Decomposes each integer token ID into token_size binary bits.
 
         Args:
-            z_quantized: Quantized tokens (B, N, C)
+            token_ids: (B, L) integer tensor with values in [0, 2^token_size - 1]
+            token_size: Number of bits (default: 16)
 
         Returns:
-            decoded: Reconstructed images (B, 3, H, W)
-            clip_pred: CLIP predictions for semantic feature reconstruction
+            bits: (B, L, token_size) with values in {0, 1}
         """
-        decoded, clip_pred = self.decoder(z_quantized)
-        return decoded, clip_pred
+        shifts = torch.arange(token_size, device=token_ids.device)
+        # Extract each bit using right shift and bitwise AND
+        bits = (token_ids.unsqueeze(-1) >> shifts) & 1
+        return bits
 
-    def decode_tokens(self, tokens):
-        """Decode discrete token indices to images.
+    def bits_to_token_ids(self, bits):
+        """Convert binary bits back to token IDs.
+
+        Recomposes token_size binary bits into integer token IDs.
 
         Args:
-            tokens: Discrete token indices (B, N)
+            bits: (B, L, token_size) with values in {0, 1}
 
         Returns:
-            decoded: Reconstructed images (B, 3, H, W)
+            token_ids: (B, L) integer tensor
         """
-        tokens = tokens.squeeze(1)
-        batch, seq_len = tokens.shape  # B x N
-        z_quantized = self.quantize.get_codebook_entry(
-            tokens.reshape(batch, -1)
-        ).reshape(batch, -1, self.decoder.width)
-        decoded = self.decode(z_quantized)[0]
-        return decoded
-
-    def forward(self, input):
-        """Forward pass: encode -> quantize -> decode.
-
-        Args:
-            input: Input images (B, 3, H, W)
-
-        Returns:
-            decoded: Reconstructed images (B, 3, H, W)
-            result_dict: Dictionary containing quantization results, CLIP predictions and ground truth
-        """
-        z_quantized, result_dict = self.encode(input)
-        decoded, clip_pred = self.decode(z_quantized)
-        result_dict["clip_pred"] = clip_pred
-        return decoded, result_dict
+        token_size = bits.shape[-1]
+        shifts = torch.arange(token_size, device=bits.device, dtype=torch.long)
+        token_ids = (bits.long() << shifts).sum(dim=-1)
+        return token_ids
