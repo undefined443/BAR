@@ -37,7 +37,9 @@ class BAR(BaseModel):
                 f"patch_size ({self.patch_size})."
             )
 
-        latent_width = config.model.generator.get("latent_width", self.original_text_seq_len)
+        latent_width = config.model.generator.get(
+            "latent_width", self.original_text_seq_len
+        )
 
         if latent_width % self.patch_size != 0:
             raise ValueError("latent grid dimensions must be divisible by patch_size.")
@@ -100,7 +102,6 @@ class BAR(BaseModel):
         # MaskBitModeling head for per-token prediction
         mbm_head_config = config.model.generator.mbm_head
         self.lm_head = MaskBitModelingHead(
-            target_codebook_size=target_codebook_size,
             num_layers=mbm_head_config.get("num_layers", 3),
             width=mbm_head_config.get("width", 2048),
             seq_len=self.vq_split_channel,
@@ -112,6 +113,11 @@ class BAR(BaseModel):
 
         # Condition token embedding
         self.embeddings = nn.Linear(768, embed_dim)
+
+        # Learnable unconditional/dropped condition embedding for classifier-free guidance
+        self.none_condition_embedding = nn.Parameter(
+            torch.randn(1, embed_dim) * 0.02
+        )
 
         # Efficient input embedding: per-channel then merge
         self.input_embeddings = nn.Embedding(
@@ -249,11 +255,13 @@ class BAR(BaseModel):
 
     def preprocess_condition(self, condition, cond_drop_prob=0.0):
         drop_label_mask = torch.rand_like(condition, dtype=torch.float) < cond_drop_prob
-        condition[drop_label_mask] = 0  # TODO: Use a dedicated "dropped" label ID if needed, currently using 0 as a placeholder
+        condition = torch.where(
+            drop_label_mask, self.none_condition_embedding, condition
+        )
         return condition
 
     def get_none_condition(self, condition):
-        return torch.full_like(condition, 0)  # TODO: Use a dedicated "none" label ID if needed, currently using 0 as a placeholder
+        return self.none_condition_embedding.expand(condition.shape[0], -1)
 
     def forward(self, input_ids, condition, random_ratio=None, orders=None):
         """Forward pass through BAR model.
