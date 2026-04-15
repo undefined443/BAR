@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Smoke Test: Generator",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/train_bar.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "config=configs/generator/bar_l_res512_caption.yaml",
+        "dataset.params.train_shards_path_or_url=/home/lx/datasets/cc12m-wds-coco-recaptioned/cc12m-coco-0000.tar",
+        "dataset.params.eval_shards_path_or_url=/home/lx/datasets/cc12m-wds-coco-recaptioned/cc12m-coco-0000.tar",
+        "dataset.params.num_workers_per_gpu=1",
+        "training.gradient_accumulation_steps=1",
+        "training.per_gpu_batch_size=1",
+        "training.num_train_steps=10",
+        "training.log_every_n_steps=1",
+        "training.compile_model=false",
+        "training.enable_wandb=false"
+      ],
+      "env": {
+        "CUDA_VISIBLE_DEVICES": "0"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ]
+}

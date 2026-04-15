@@ -96,7 +96,6 @@ class SimpleImageDataset:
         random_flip=True,
         normalize_mean: List[float] = [0.5, 0.5, 0.5],
         normalize_std: List[float] = [0.5, 0.5, 0.5],
-        dataset_with_class_label: bool = True,
     ):
         """Initializes the WebDatasetReader class.
 
@@ -114,7 +113,6 @@ class SimpleImageDataset:
             interpolation: A string, the interpolation mode to be used. Supported values are "bicubic" and "bilinear".
             normalize_mean: A list of float, the normalization mean used to normalize the image tensor.
             normalize_std: A list of float, the normalization std used to normalize the image tensor.
-            dataset_with_class_label: A boolean, whether using the training data contains class labels (e.g., ImageNet).
         """
         transform = ImageTransform(
             resize_shorter_edge,
@@ -125,43 +123,24 @@ class SimpleImageDataset:
             normalize_std,
         )
 
-        if dataset_with_class_label:
-            train_processing_pipeline = [
-                wds.decode(
-                    wds.autodecode.ImageHandler(
-                        "pil", extensions=["webp", "png", "jpg", "jpeg"]
-                    )
-                ),
-                wds.rename(
-                    image="jpg;png;jpeg;webp",
-                    class_id="cls",
-                    handler=wds.warn_and_continue,
-                ),
-                wds.map(filter_keys(set(["image", "class_id", "filename"]))),
-                wds.map_dict(
-                    image=transform.train_transform,
-                    class_id=lambda x: int(x),
-                    handler=wds.warn_and_continue,
-                ),
-            ]
-        else:
-            # The tar file format of openimages is slightly different, due to missing "class_id".
-            train_processing_pipeline = [
-                wds.decode(
-                    wds.autodecode.ImageHandler(
-                        "pil", extensions=["webp", "png", "jpg", "jpeg"]
-                    )
-                ),
-                wds.rename(
-                    image="jpg;png;jpeg;webp",
-                    handler=wds.warn_and_continue,
-                ),
-                wds.map(filter_keys(set(["image", "txt"]))),
-                wds.map_dict(
-                    image=transform.train_transform,
-                    handler=wds.warn_and_continue,
-                ),
-            ]
+        train_processing_pipeline = [
+            wds.decode(
+                wds.autodecode.ImageHandler(
+                    "pil", extensions=["webp", "png", "jpg", "jpeg"]
+                )
+            ),
+            wds.rename(
+                image="jpg;png;jpeg;webp",
+                caption="txt",
+                handler=wds.warn_and_continue,
+            ),
+            wds.map(filter_keys(set(["image", "caption"]))),
+            wds.map_dict(
+                image=transform.train_transform,
+                caption=lambda x: x,
+                handler=wds.warn_and_continue,
+            ),
+        ]
 
         test_processing_pipeline = [
             wds.decode(
@@ -171,13 +150,13 @@ class SimpleImageDataset:
             ),
             wds.rename(
                 image="jpg;png;jpeg;webp",
-                class_id="cls",
+                caption="txt",
                 handler=wds.warn_and_continue,
             ),
-            wds.map(filter_keys(set(["image", "class_id", "filename"]))),
+            wds.map(filter_keys(set(["image", "txt", "filename"]))),
             wds.map_dict(
                 image=transform.eval_transform,
-                class_id=lambda x: int(x),
+                caption=lambda x: x,
                 handler=wds.warn_and_continue,
             ),
         ]

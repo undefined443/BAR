@@ -15,12 +15,12 @@ from torch.utils.data import DataLoader
 from omegaconf import OmegaConf
 from torch.optim import AdamW
 from utils.lr_schedulers import get_scheduler
-from modeling.modules import EMAModel, ReconstructionLoss
-from modeling.tokenizer import BAR_FSQ
+from modeling.modules import EMAModel
 from modeling.generator import BAR
 from evaluator import VQGANEvaluator
 
 from utils.viz_utils import make_viz_from_samples, make_viz_from_samples_generation
+from modeling.tokenizer import CLIPTextTokenizer
 
 
 def get_config():
@@ -57,56 +57,31 @@ class AverageMeter(object):
 
 
 def get_pretrained_tokenizer(config):
-    """Load pretrained tokenizer.
+    """Load pretrained text tokenizer for text diffusion.
 
     Args:
-        config: Config object. If config.tokenizer_config is specified,
-                the model.vq_model section should already be merged into config.
+        config: Config object.
 
     Returns:
-        Loaded tokenizer model in eval mode with gradients disabled.
+        Loaded CLIPTextTokenizer in eval mode with gradients disabled.
     """
-    model = BAR_FSQ(config)
+    # Load CLIP text tokenizer
+    clip_model_name = getattr(config.experiment, "clip_model_name", "openai/clip-vit-large-patch14")
+    tokenizer = CLIPTextTokenizer(model_name=clip_model_name)
+    tokenizer.eval()
 
-    # Load checkpoint and clean up keys
-    checkpoint_path = config.experiment.tokenizer_checkpoint
-    if os.path.isfile(checkpoint_path):
-        model_file = checkpoint_path
-    elif os.path.isdir(checkpoint_path):
-        model_file = os.path.join(checkpoint_path, "pytorch_model.bin")
-        if not os.path.isfile(model_file):
-            raise ValueError(f"{model_file} does not exist")
-    else:
-        raise ValueError(f"{checkpoint_path} does not exist")
+    # Disable gradients for inference
+    for param in tokenizer.model.parameters():
+        param.requires_grad = False
 
-    checkpoint = torch.load(model_file, map_location="cpu")
-
-    # Remove "_orig_mod.module." prefix from all keys
-    cleaned_state_dict = {}
-    for key, value in checkpoint.items():
-        new_key = key.replace("_orig_mod.module.", "")
-        cleaned_state_dict[new_key] = value
-
-    # Load cleaned state dict
-    msg = model.load_state_dict(cleaned_state_dict, strict=False)
-    print(f"Loading tokenizer from {model_file}, msg: {msg}")
-
-    model.eval()
-    model.requires_grad_(False)
-    return model
+    return tokenizer
 
 
-def create_model_and_loss_module(config, logger, accelerator, model_type="tokenizer"):
-    """Creates BAR_FSQ tokenizer model or BAR generator model and loss module."""
+def create_model_and_loss_module(config, logger, accelerator):
+    """Creates BAR generator model and loss module."""
     logger.info("Creating model and loss module.")
-    if model_type == "tokenizer":
-        model_cls = BAR_FSQ
-        loss_cls = ReconstructionLoss
-    elif model_type == "generator":
-        model_cls = BAR
-        loss_cls = None  # but we will not use
-    else:
-        raise ValueError(f"Unsupported model_type {model_type}")
+    model_cls = BAR
+    loss_cls = None  # but we will not use
     model = model_cls(config)
     print(model)
 
@@ -146,9 +121,6 @@ def create_model_and_loss_module(config, logger, accelerator, model_type="tokeni
         logger.info(f"Total parameters: {total_params:,}")
         logger.info(f"Trainable parameters: {trainable_params:,}")
 
-        if model_type == "tokenizer" and loss_module.discriminator is not None:
-            disc_params = sum(p.numel() for p in loss_module.discriminator.parameters())
-            logger.info(f"Discriminator parameters: {disc_params:,}")
         logger.info("=" * 80)
 
     return model, ema_model, loss_module
@@ -337,7 +309,6 @@ def create_dataloader(config, logger, accelerator):
         crop_size=preproc_config.crop_size,
         random_crop=preproc_config.random_crop,
         random_flip=preproc_config.random_flip,
-        dataset_with_class_label=dataset_config.get("dataset_with_class_label", True),
     )
     train_dataloader, eval_dataloader = (
         dataset.train_dataloader,
@@ -776,27 +747,21 @@ def generator_train_one_epoch(
                 memory_format=torch.contiguous_format,
                 non_blocking=True,
             )
-        elif "image" in batch:
+        elif "caption" in batch:
+            captions = batch["caption"]
             images = batch["image"].to(
                 accelerator.device,
                 memory_format=torch.contiguous_format,
                 non_blocking=True,
             )
-            conditions = batch["class_id"].to(
-                accelerator.device,
-                memory_format=torch.contiguous_format,
-                non_blocking=True,
-            )
-            # Encode images on the flight.
-            # Note: tokenizer mode (train/eval) is set once at initialization in train_rar.py
-            # based on config.training.online_tokenization_with_noises
+            # Encode texts on the flight.
             with torch.no_grad():
                 if tokenizer_encode_fn is not None:
-                    min_encoding_indices = tokenizer_encode_fn(images)
+                    input_tokens, conditions = tokenizer_encode_fn(captions, images)
                 else:
-                    _, encode_dict = tokenizer.encode(images)
-                    min_encoding_indices = encode_dict["min_encoding_indices"]
-                input_tokens = min_encoding_indices.reshape(images.shape[0], -1)
+                    # Fallback: call tokenizer.encode directly
+                    input_tokens, conditions = tokenizer.encode(captions, images)
+                input_tokens = input_tokens.reshape(len(captions), -1)
         else:
             raise NotImplementedError
 

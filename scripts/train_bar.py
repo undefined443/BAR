@@ -105,15 +105,15 @@ def main():
     tokenizer_encode_fn = None
     if not config.dataset.params.get("pretokenization", ""):
 
-        def _tokenizer_encode(images):
+        def _tokenizer_encode(texts, images):
             # Mode is already set above; don't change it here to avoid torch.compile issues
-            _, encode_dict = tokenizer.encode(images)
-            return encode_dict["min_encoding_indices"]
+            token_ids, embeddings = tokenizer.encode(texts, images)
+            return token_ids, embeddings
 
         tokenizer_encode_fn = _tokenizer_encode
 
     model, ema_model, loss_module = create_model_and_loss_module(
-        config, logger, accelerator, model_type="generator"
+        config, logger, accelerator
     )
 
     optimizer, _ = create_optimizer(config, logger, model, loss_module)
