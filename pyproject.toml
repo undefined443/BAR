@@ -29,6 +29,7 @@ dependencies = [
     "torch~=2.10.0",
     "torchvision",
     "flash-attn",
+    "tensorboard>=2.20.0",
 ]
 
 [tool.uv.sources]

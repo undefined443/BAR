@@ -6,12 +6,33 @@ Ref:
 """
 
 import math
+import random
 from typing import List, Union, Text, Tuple
 import webdataset as wds
 import torch
 from torch.utils.data import default_collate
 from torchvision import transforms, datasets
 import numpy as np
+
+
+def normalize_caption(caption):
+    """Normalize caption to a single string.
+
+    COCO and similar datasets store multiple captions per image (e.g. as a
+    JSON list or a dict with a 'captions' key).  ``default_collate`` cannot
+    stack variable-length Python lists, so we pick one caption randomly here,
+    before the batch is assembled.
+    """
+    if isinstance(caption, list):
+        return random.choice(caption)
+    if isinstance(caption, dict):
+        candidates = caption.get("captions", caption.get("caption"))
+        if candidates is None:
+            candidates = list(caption.values())
+        if isinstance(candidates, list):
+            return random.choice(candidates)
+        return str(candidates)
+    return caption
 
 
 def filter_keys(key_set):
@@ -131,13 +152,13 @@ class SimpleImageDataset:
             ),
             wds.rename(
                 image="jpg;png;jpeg;webp",
-                caption="txt",
+                caption="txt;json",
                 handler=wds.warn_and_continue,
             ),
             wds.map(filter_keys(set(["image", "caption"]))),
             wds.map_dict(
                 image=transform.train_transform,
-                caption=lambda x: x,
+                caption=normalize_caption,
                 handler=wds.warn_and_continue,
             ),
         ]
@@ -150,13 +171,13 @@ class SimpleImageDataset:
             ),
             wds.rename(
                 image="jpg;png;jpeg;webp",
-                caption="txt",
+                caption="txt;json",
                 handler=wds.warn_and_continue,
             ),
-            wds.map(filter_keys(set(["image", "txt", "filename"]))),
+            wds.map(filter_keys(set(["image", "caption"]))),
             wds.map_dict(
                 image=transform.eval_transform,
-                caption=lambda x: x,
+                caption=normalize_caption,
                 handler=wds.warn_and_continue,
             ),
         ]

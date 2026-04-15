@@ -20,3 +20,5 @@ bar_*/
 pretokenized_npz*
 ImageNet-1K-wds
 wandb
+.claude/
+*.log

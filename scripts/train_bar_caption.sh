@@ -12,5 +12,7 @@ uv run accelerate launch \
     --same_network \
     scripts/train_bar.py \
     config=configs/generator/bar_l_res512_caption.yaml \
+    dataset.params.train_shards_path_or_url="/meta_eon_cfs/home/lx/datasets/COCO-2014-WDS/train/train-{00000..00113}.tar" \
+    dataset.params.eval_shards_path_or_url="/meta_eon_cfs/home/lx/datasets/COCO-2014-WDS/test/test-{00000..00004}.tar" \
     training.gradient_accumulation_steps=1 \
     training.per_gpu_batch_size=$((2048 / 8))

@@ -10,8 +10,8 @@
       "justMyCode": true,
       "args": [
         "config=configs/generator/bar_l_res512_caption.yaml",
-        "dataset.params.train_shards_path_or_url=/home/lx/datasets/cc12m-wds-coco-recaptioned/cc12m-coco-0000.tar",
-        "dataset.params.eval_shards_path_or_url=/home/lx/datasets/cc12m-wds-coco-recaptioned/cc12m-coco-0000.tar",
+        "dataset.params.train_shards_path_or_url=/meta_eon_cfs/home/lx/datasets/COCO-2014-WDS/train/train-00000.tar",
+        "dataset.params.eval_shards_path_or_url=/meta_eon_cfs/home/lx/datasets/COCO-2014-WDS/test/test-00000.tar",
         "dataset.params.num_workers_per_gpu=1",
         "training.gradient_accumulation_steps=1",
         "training.per_gpu_batch_size=1",
