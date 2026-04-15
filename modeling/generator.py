@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from modeling.modules import BaseModel
 from modeling.modules.blocks import init_weights, Block, RMSNorm
-from modeling.modules.rope import VisionRotaryEmbeddingFast
+from modeling.modules.rope import RotaryEmbeddingFast
 from .mbm_head import MaskBitModelingHead
 from einops import rearrange
 
@@ -28,42 +28,24 @@ class BAR(BaseModel):
         self.num_heads = num_heads
         mlp_ratio = 4.0  # Always use 4.0 for SwiGLU
 
-        self.original_image_seq_len = config.model.generator.image_seq_len
+        self.original_text_seq_len = config.model.generator.text_seq_len
         self.patch_size = config.model.generator.get("patch_size", 1)
-        self.patch_size_sq = self.patch_size**2
 
-        if self.original_image_seq_len % self.patch_size_sq != 0:
+        if self.original_text_seq_len % self.patch_size != 0:
             raise ValueError(
-                f"image_seq_len {self.original_image_seq_len} must be divisible by "
-                f"patch_size^2 ({self.patch_size_sq})."
+                f"text_seq_len {self.original_text_seq_len} must be divisible by "
+                f"patch_size ({self.patch_size})."
             )
 
-        latent_height = config.model.generator.get("latent_height", None)
-        latent_width = config.model.generator.get("latent_width", None)
-        if latent_height is None or latent_width is None:
-            sqrt_len = int(math.sqrt(self.original_image_seq_len))
-            if sqrt_len * sqrt_len != self.original_image_seq_len:
-                raise ValueError(
-                    "patch_size requires image_seq_len to form a square "
-                    "grid when latent_height/latent_width are not provided."
-                )
-            latent_height = sqrt_len
-            latent_width = sqrt_len
-        elif latent_height * latent_width != self.original_image_seq_len:
-            raise ValueError(
-                f"latent_height ({latent_height}) * latent_width ({latent_width}) "
-                f"must equal image_seq_len ({self.original_image_seq_len})."
-            )
+        latent_width = config.model.generator.get("latent_width", self.original_text_seq_len)
 
-        if latent_height % self.patch_size != 0 or latent_width % self.patch_size != 0:
+        if latent_width % self.patch_size != 0:
             raise ValueError("latent grid dimensions must be divisible by patch_size.")
 
-        self.latent_height = latent_height
         self.latent_width = latent_width
-        self.image_seq_len = self.original_image_seq_len // self.patch_size_sq
+        self.text_seq_len = config.model.generator.get("text_seq_len", 77)
 
         target_codebook_size = config.model.generator.target_codebook_size
-        condition_num_classes = config.model.generator.condition_num_classes
 
         generator_config = config.model.generator
         self.repeat_class_condition = generator_config.get("repeat_class_condition", 32)
@@ -73,26 +55,9 @@ class BAR(BaseModel):
         # Always use RMSNorm, SwiGLU, RoPE, and target-aware RoPE
         norm_layer = RMSNorm
 
-        # Always initialize RoPE
+        # Initialize 1D RoPE for text sequences
         head_dim = embed_dim // num_heads
-        # Compute spatial grid size for 2D RoPE
-        # image_seq_len should be a perfect square for 2D grid
-        spatial_size = int(math.sqrt(self.image_seq_len))
-        assert spatial_size * spatial_size == self.image_seq_len, (
-            f"image_seq_len must be a perfect square for RoPE, got {self.image_seq_len}"
-        )
-
-        # Note: For 2D spatial RoPE, the dimension is doubled internally (broadcat for h and w),
-        # so we pass half_head_dim to get head_dim output
-        half_head_dim = head_dim // 2
-        # num_cls_token = 1 (cls_token) + repeat_class_condition (condition tokens)
-        rope = VisionRotaryEmbeddingFast(
-            dim=half_head_dim,
-            pt_seq_len=spatial_size,  # spatial dimension (e.g., 16 for 16x16 grid)
-            freqs_for="lang",
-            num_cls_token=1
-            + self.repeat_class_condition,  # cls_token + repeated condition tokens
-        )
+        rope = RotaryEmbeddingFast(dim=head_dim)
 
         self.cls_token = nn.init.trunc_normal_(
             nn.Parameter(torch.zeros(1, 1, embed_dim)), 0.0, 0.02
@@ -112,25 +77,25 @@ class BAR(BaseModel):
                     use_swiglu=True,
                     use_adaln=True,
                     rope=rope,
-                    target_aware_rope=True,
+                    target_aware_rope=False,
                 )
                 for i in range(depth)
             ]
         )
 
         self.pos_embed = nn.init.trunc_normal_(
-            nn.Parameter(torch.zeros(1, self.image_seq_len + 128, embed_dim)), 0.0, 0.02
+            nn.Parameter(torch.zeros(1, self.text_seq_len + 128, embed_dim)), 0.0, 0.02
         )
 
         self.target_aware_pos_embed = nn.init.trunc_normal_(
-            nn.Parameter(torch.zeros(1, self.image_seq_len + 128, embed_dim)), 0.0, 0.02
+            nn.Parameter(torch.zeros(1, self.text_seq_len + 128, embed_dim)), 0.0, 0.02
         )
 
         self.norm = norm_layer(embed_dim)
 
         # FSQ uses token_size
         self.base_vq_split_channel = config.model.vq_model.token_size
-        self.vq_split_channel = self.base_vq_split_channel * self.patch_size_sq
+        self.vq_split_channel = self.base_vq_split_channel * self.patch_size
 
         # MaskBitModeling head for per-token prediction
         mbm_head_config = config.model.generator.mbm_head
@@ -142,19 +107,11 @@ class BAR(BaseModel):
         )
         self.latent_condition_proj = nn.Linear(embed_dim, self.lm_head.width)
 
-        self.condition_num_classes = condition_num_classes
-        self.target_codebook_size = target_codebook_size
-        self.none_condition_id = (
-            self.condition_num_classes + self.target_codebook_size + 1
-        )
-
         self.use_checkpoint = config.model.generator.get("use_checkpoint", False)
         self.random_ratio = 0.0
 
         # Condition token embedding
-        self.embeddings = nn.Embedding(
-            target_codebook_size + 1 + condition_num_classes + 1, embed_dim
-        )
+        self.embeddings = nn.Linear(768, embed_dim)
 
         # Efficient input embedding: per-channel then merge
         self.input_embeddings = nn.Embedding(
@@ -168,11 +125,11 @@ class BAR(BaseModel):
 
         # Timestep embeddings for AdaLN conditioning
         self.timesteps_embeddings = nn.init.trunc_normal_(
-            nn.Parameter(torch.zeros(1, self.image_seq_len + 100, embed_dim)), 0.0, 0.02
+            nn.Parameter(torch.zeros(1, self.text_seq_len + 100, embed_dim)), 0.0, 0.02
         )
 
         # Register causal attention mask as buffer
-        max_seq_len = self.image_seq_len + 128
+        max_seq_len = self.text_seq_len + 128
         causal_mask = build_causal_mask(max_seq_len)
         self.register_buffer("causal_mask", causal_mask, persistent=False)
 
@@ -218,11 +175,11 @@ class BAR(BaseModel):
 
         # Always compute both orders to make torch.compile happy
         raster_orders = (
-            torch.arange(self.image_seq_len, device=device)
+            torch.arange(self.text_seq_len, device=device)
             .unsqueeze(0)
             .expand(batch_size, -1)
         )
-        random_logits = torch.rand(batch_size, self.image_seq_len, device=device)
+        random_logits = torch.rand(batch_size, self.text_seq_len, device=device)
         random_orders = torch.argsort(random_logits, dim=-1)
 
         # Use probabilistic blending for all cases
@@ -230,7 +187,7 @@ class BAR(BaseModel):
         # When random_ratio=1: mask is always True → returns random_orders
         # When 0 < random_ratio < 1: blends based on per-batch random mask
         random_mask = (torch.rand(batch_size, 1, device=device) < random_ratio).expand(
-            -1, self.image_seq_len
+            -1, self.text_seq_len
         )
         return torch.where(random_mask, random_orders, raster_orders)
 
@@ -241,7 +198,7 @@ class BAR(BaseModel):
         batch_size = x.shape[0]
         # torch.compile-friendly: use expand instead of list comprehension
         raster_orders = (
-            torch.arange(self.image_seq_len, device=x.device)
+            torch.arange(self.text_seq_len, device=x.device)
             .unsqueeze(0)
             .expand(batch_size, -1)
         )
@@ -269,41 +226,34 @@ class BAR(BaseModel):
     def _downsample_tokens(self, tokens):
         if self.patch_size == 1:
             return tokens
-        sh = sw = self.patch_size
-        h = self.latent_height // sh
+        sw = self.patch_size
         w = self.latent_width // sw
         return rearrange(
             tokens,
-            "b (h sh w sw) n -> b (h w) (sh sw n)",
-            h=h,
+            "b (w sw) n -> b w (sw n)",
             w=w,
-            sh=sh,
             sw=sw,
         )
 
     def _upsample_tokens(self, tokens):
         if self.patch_size == 1:
             return tokens
-        sh = sw = self.patch_size
-        h = self.latent_height // sh
+        sw = self.patch_size
         w = self.latent_width // sw
         return rearrange(
             tokens,
-            "b (h w) (sh sw n) -> b (h sh w sw) n",
-            h=h,
+            "b w (sw n) -> b (w sw) n",
             w=w,
-            sh=sh,
             sw=sw,
         )
 
     def preprocess_condition(self, condition, cond_drop_prob=0.0):
         drop_label_mask = torch.rand_like(condition, dtype=torch.float) < cond_drop_prob
-        condition = condition + self.target_codebook_size + 1
-        condition[drop_label_mask] = self.none_condition_id
+        condition[drop_label_mask] = 0  # TODO: Use a dedicated "dropped" label ID if needed, currently using 0 as a placeholder
         return condition
 
     def get_none_condition(self, condition):
-        return torch.full_like(condition, self.none_condition_id)
+        return torch.full_like(condition, 0)  # TODO: Use a dedicated "none" label ID if needed, currently using 0 as a placeholder
 
     def forward(self, input_ids, condition, random_ratio=None, orders=None):
         """Forward pass through BAR model.
@@ -348,11 +298,10 @@ class BAR(BaseModel):
     ):
         if apply_generator_downsample is None:
             apply_generator_downsample = not is_sampling
-
         if apply_generator_downsample and self.patch_size > 1:
             input_ids = input_ids.reshape(
                 input_ids.shape[0],
-                self.original_image_seq_len,
+                self.original_text_seq_len,
                 self.base_vq_split_channel,
             )
             input_ids = self._downsample_tokens(input_ids)
@@ -381,7 +330,7 @@ class BAR(BaseModel):
         )  # cls_token + repeated condition tokens
         pos_embed_prefix = pos_embed[:, :prefix]
         pos_embed_postfix = self.shuffle(
-            pos_embed[:, prefix : prefix + self.image_seq_len], orders
+            pos_embed[:, prefix : prefix + self.text_seq_len], orders
         )
 
         # Prepare target-aware positional embeddings
@@ -399,7 +348,7 @@ class BAR(BaseModel):
 
         # Shuffle target_aware_pos_embed using target_orders to get embeddings for prediction targets
         target_aware_pos_embed_shuffled = self.shuffle(
-            target_aware_pos_embed[:, prefix : prefix + self.image_seq_len],
+            target_aware_pos_embed[:, prefix : prefix + self.text_seq_len],
             target_orders,
         )
 
@@ -460,7 +409,7 @@ class BAR(BaseModel):
                     .unsqueeze(0)
                     .expand(batch_size, -1),  # [B, prefix]
                     orders
-                    + prefix,  # [B, image_seq_len] with positions [prefix, prefix+1, ...]
+                    + prefix,  # [B, text_seq_len] with positions [prefix, prefix+1, ...]
                 ],
                 dim=1,
             )  # [B, seq_len]
@@ -483,11 +432,11 @@ class BAR(BaseModel):
             # Shift orders by 1: [orders[1], orders[2], ..., orders[-1], orders[-1]]
             shuffled_targets = (
                 torch.cat([orders[:, 1:], orders[:, -1:]], dim=1) + prefix
-            )  # [B, image_seq_len]
+            )  # [B, text_seq_len]
 
             target_rope_order_full = torch.cat(
                 [prefix_targets, shuffled_targets], dim=1
-            )  # [B, prefix + image_seq_len]
+            )  # [B, prefix + text_seq_len]
             target_rope_order = target_rope_order_full[
                 :, :seq_len
             ]  # Slice to current sequence length
@@ -577,8 +526,8 @@ class BAR(BaseModel):
         else:
             cfg_orders = orders
 
-        for step in range(self.image_seq_len):
-            ratio = step / self.image_seq_len
+        for step in range(self.text_seq_len):
+            ratio = step / self.text_seq_len
 
             # Linear CFG annealing: cfg_scale increases from 1.0 to guidance_scale
             if guidance_scale <= 1.0:
@@ -610,7 +559,7 @@ class BAR(BaseModel):
 
         self.disable_kv_cache()
 
-        ids = ids.view(ids.shape[0], self.image_seq_len, self.vq_split_channel)
+        ids = ids.view(ids.shape[0], self.text_seq_len, self.vq_split_channel)
 
         if orders is not None:
             # at last, unshuffle the ids
