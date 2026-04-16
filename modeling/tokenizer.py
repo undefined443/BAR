@@ -67,9 +67,9 @@ class CLIPTextTokenizer:
                 images = (images * 0.5 + 0.5).clamp(0, 1)
                 do_rescale = False
             # Get embeddings from CLIP
-            processed_images = self.image_processor(images, return_tensors="pt", do_rescale=do_rescale)[
-                "pixel_values"
-            ].to(self.device)
+            processed_images = self.image_processor(
+                images, return_tensors="pt", do_rescale=do_rescale
+            )["pixel_values"].to(self.device)
             outputs = self.model.vision_model(pixel_values=processed_images)
             image_embeddings = self.model.visual_projection(
                 outputs.pooler_output
