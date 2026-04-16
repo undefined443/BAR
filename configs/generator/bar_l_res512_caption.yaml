@@ -16,6 +16,8 @@ model:
     codebook_size: 1024
     token_size: 16
     vit_dec_patch_size: 16
+    vision_hidden_size: 1024  # CLIP last_hidden_state dim
+
   generator:
     hidden_size: 1280
     num_hidden_layers: 32

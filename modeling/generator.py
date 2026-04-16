@@ -50,7 +50,7 @@ class BAR(BaseModel):
         target_codebook_size = config.model.generator.target_codebook_size
 
         generator_config = config.model.generator
-        self.repeat_class_condition = generator_config.get("repeat_class_condition", 32)
+        self.condition_seq_len = generator_config.get("condition_seq_len", 257)  # CLIP last_hidden_state.shape[1]
         self.dropout = generator_config.get("dropout", 0.0)
         self.attn_drop = generator_config.get("attn_drop", 0.0)
 
@@ -77,7 +77,7 @@ class BAR(BaseModel):
                     attn_drop=self.attn_drop,
                     norm_layer=norm_layer,
                     use_swiglu=True,
-                    use_adaln=True,
+                    use_adaln=False,
                     rope=rope,
                     target_aware_rope=False,
                 )
@@ -86,11 +86,11 @@ class BAR(BaseModel):
         )
 
         self.pos_embed = nn.init.trunc_normal_(
-            nn.Parameter(torch.zeros(1, self.text_seq_len + 128, embed_dim)), 0.0, 0.02
+            nn.Parameter(torch.zeros(1, 1 + self.condition_seq_len + self.text_seq_len, embed_dim)), 0.0, 0.02
         )
 
         self.target_aware_pos_embed = nn.init.trunc_normal_(
-            nn.Parameter(torch.zeros(1, self.text_seq_len + 128, embed_dim)), 0.0, 0.02
+            nn.Parameter(torch.zeros(1, 1 + self.condition_seq_len + self.text_seq_len, embed_dim)), 0.0, 0.02
         )
 
         self.norm = norm_layer(embed_dim)
@@ -112,10 +112,10 @@ class BAR(BaseModel):
         self.random_ratio = 0.0
 
         # Condition token embedding
-        self.embeddings = nn.Linear(768, embed_dim)
+        self.embeddings = nn.Linear(config.model.vq_model.vision_hidden_size, embed_dim)
 
         # Learnable unconditional/dropped condition embedding for classifier-free guidance
-        self.none_condition_embedding = nn.Parameter(torch.randn(1, 768) * 0.02)
+        self.none_condition_embedding = nn.Parameter(torch.randn(1, config.model.vq_model.vision_hidden_size) * 0.02)
 
         # Efficient input embedding: per-channel then merge
         self.input_embeddings = nn.Embedding(
@@ -127,29 +127,12 @@ class BAR(BaseModel):
             bias=True,
         )
 
-        # Timestep embeddings for AdaLN conditioning
-        self.timesteps_embeddings = nn.init.trunc_normal_(
-            nn.Parameter(torch.zeros(1, self.text_seq_len + 100, embed_dim)), 0.0, 0.02
-        )
-
         # Register causal attention mask as buffer
-        max_seq_len = self.text_seq_len + 128
+        max_seq_len = 1 + self.condition_seq_len + self.text_seq_len
         causal_mask = build_causal_mask(max_seq_len)
         self.register_buffer("causal_mask", causal_mask, persistent=False)
 
         self.apply(init_weights)
-
-        # Initialize AdaLN-Zero for transformer blocks
-        for block in self.blocks:
-            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
-
-        # Initialize AdaLN-Zero for MaskBitModeling head
-        for block in self.lm_head.transformer:
-            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
-        nn.init.constant_(self.lm_head.adaln_before_head.adaLN_modulation[-1].weight, 0)
-        nn.init.constant_(self.lm_head.adaln_before_head.adaLN_modulation[-1].bias, 0)
 
     def enable_kv_cache(self):
         for block in self.blocks:
@@ -322,17 +305,12 @@ class BAR(BaseModel):
         condition_token = self.embeddings(condition)
         input_embed = self.embed_input_ids(input_ids)
 
-        # Repeat condition_token according to repeat_class_condition
-        # Shape: (B, repeat_class_condition, embed_dim)
-        repeated_condition_token = condition_token.unsqueeze(1).repeat(
-            1, self.repeat_class_condition, 1
-        )
-        embeddings = torch.cat([repeated_condition_token, input_embed], dim=1)
+        embeddings = torch.cat([condition_token, input_embed], dim=1)
 
         # Prepare positional embeddings with shuffling
         pos_embed = self.pos_embed.repeat(input_ids.shape[0], 1, 1)
         prefix = (
-            1 + self.repeat_class_condition
+            1 + self.condition_seq_len
         )  # cls_token + repeated condition tokens
         pos_embed_prefix = pos_embed[:, :prefix]
         pos_embed_postfix = self.shuffle(
@@ -375,11 +353,11 @@ class BAR(BaseModel):
 
         if not is_sampling:
             labels = self.shuffle(labels, orders)
-            # Keep repeated condition tokens (first repeat_class_condition positions) together, shuffle the rest
+            # Keep condition tokens (first condition_seq_len positions) together, shuffle the rest
             embeddings = torch.cat(
                 [
-                    embeddings[:, : self.repeat_class_condition],
-                    self.shuffle(embeddings[:, self.repeat_class_condition :], orders),
+                    embeddings[:, : self.condition_seq_len],
+                    self.shuffle(embeddings[:, self.condition_seq_len :], orders),
                 ],
                 dim=1,
             )
@@ -392,19 +370,12 @@ class BAR(BaseModel):
         # Add target-aware positional embeddings
         x = x + target_aware_pos_embed_full[:, : x.shape[1]]
 
-        time_embeddings = self.timesteps_embeddings[:, : x.shape[1]]
-        # Expand condition_token for each repeated position and add time embeddings
-        # Shape: (B, 1, embed_dim) -> (B, repeat_class_condition, embed_dim)
-        condition_token_with_time = condition_token.unsqueeze(1) + time_embeddings
-        # Expand to full sequence for use in blocks
-        # condition_token_for_blocks = F.silu(condition_token_for_blocks)
-
         # Prepare causal attention mask for current sequence length
         seq_len = x.shape[1]
         attn_mask = self.causal_mask[:seq_len, :seq_len]
 
         # Prepare RoPE order for shuffled tokens (always use RoPE with target-aware positions)
-        # Sequence structure: [cls_token (pos 0), condition_tokens (pos 1..repeat_class_condition), shuffled_tokens (pos prefix+)]
+        # Sequence structure: [cls_token (pos 0), condition_tokens (pos 1..condition_seq_len), shuffled_tokens (pos prefix+)]
         if orders is not None:
             # Create position indices for the full sequence
             # Prefix tokens keep their positions [0, 1, ..., prefix-1], shuffled tokens get orders + prefix
@@ -452,7 +423,6 @@ class BAR(BaseModel):
 
         if self.blocks[0].attn.kv_cache and self.blocks[0].attn.k_cache is not None:
             x = x[:, -1:]
-            condition_token_with_time = condition_token_with_time[:, -1:]
             attn_mask = None
             # Keep rope_order for the last position to support random order generation with KV cache
             if rope_order is not None:
@@ -466,7 +436,6 @@ class BAR(BaseModel):
                     blk.forward,
                     x,
                     attn_mask,
-                    condition_token_with_time,
                     rope_order,
                     target_rope_order,
                     use_reentrant=False,
@@ -475,14 +444,12 @@ class BAR(BaseModel):
                 x = blk(
                     x,
                     attn_mask=attn_mask,
-                    c=condition_token_with_time,
                     rope_order=rope_order,
                     target_rope_order=target_rope_order,
                 )
 
         if not self.blocks[0].attn.kv_cache:
             x = x[:, prefix - 1 :]
-            condition_token_with_time = condition_token_with_time[:, prefix - 1 :]
 
         x = self.norm(x)
         x = self.latent_condition_proj(x)
