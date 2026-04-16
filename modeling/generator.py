@@ -4,7 +4,6 @@ import torch.nn as nn
 from modeling.modules import BaseModel
 from modeling.modules.blocks import init_weights, Block, RMSNorm
 from modeling.modules.rope import RotaryEmbeddingFast
-from .mbm_head import MaskBitModelingHead
 from einops import rearrange
 
 
@@ -101,6 +100,13 @@ class BAR(BaseModel):
 
         # MaskBitModeling head for per-token prediction
         mbm_head_config = config.model.generator.mbm_head
+        use_ddim = mbm_head_config.get("use_ddim", False)
+
+        if use_ddim:
+            from .mbm_head_ddim import MaskBitModelingHead
+        else:
+            from .mbm_head import MaskBitModelingHead
+
         self.lm_head = MaskBitModelingHead(
             num_layers=mbm_head_config.get("num_layers", 3),
             width=mbm_head_config.get("width", 2048),

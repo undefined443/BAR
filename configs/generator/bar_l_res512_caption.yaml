@@ -38,6 +38,7 @@ model:
       num_layers: 3
       randomize_temperature: 1.0
       tokens_allocation: [2, 2, 2, 4]
+      use_ddim: true
 
 dataset:
   params:
