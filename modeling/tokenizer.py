@@ -61,8 +61,13 @@ class CLIPTextTokenizer:
             token_ids = inputs["input_ids"].to(self.device)
             token_bits = self.token_ids_to_bits(token_ids)
 
+            # Rescale images from [-1, 1] to [0, 1] for CLIP image processor
+            do_rescale = True
+            if isinstance(images, torch.Tensor):
+                images = (images * 0.5 + 0.5).clamp(0, 1)
+                do_rescale = False
             # Get embeddings from CLIP
-            processed_images = self.image_processor(images, return_tensors="pt")[
+            processed_images = self.image_processor(images, return_tensors="pt", do_rescale=do_rescale)[
                 "pixel_values"
             ].to(self.device)
             outputs = self.model.vision_model(pixel_values=processed_images)
