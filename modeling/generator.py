@@ -49,7 +49,9 @@ class BAR(BaseModel):
         target_codebook_size = config.model.generator.target_codebook_size
 
         generator_config = config.model.generator
-        self.condition_seq_len = generator_config.get("condition_seq_len", 257)  # CLIP last_hidden_state.shape[1]
+        self.condition_seq_len = generator_config.get(
+            "condition_seq_len", 257
+        )  # CLIP last_hidden_state.shape[1]
         self.dropout = generator_config.get("dropout", 0.0)
         self.attn_drop = generator_config.get("attn_drop", 0.0)
 
@@ -85,11 +87,23 @@ class BAR(BaseModel):
         )
 
         self.pos_embed = nn.init.trunc_normal_(
-            nn.Parameter(torch.zeros(1, 1 + self.condition_seq_len + self.text_seq_len, embed_dim)), 0.0, 0.02
+            nn.Parameter(
+                torch.zeros(
+                    1, 1 + self.condition_seq_len + self.text_seq_len, embed_dim
+                )
+            ),
+            0.0,
+            0.02,
         )
 
         self.target_aware_pos_embed = nn.init.trunc_normal_(
-            nn.Parameter(torch.zeros(1, 1 + self.condition_seq_len + self.text_seq_len, embed_dim)), 0.0, 0.02
+            nn.Parameter(
+                torch.zeros(
+                    1, 1 + self.condition_seq_len + self.text_seq_len, embed_dim
+                )
+            ),
+            0.0,
+            0.02,
         )
 
         self.norm = norm_layer(embed_dim)
@@ -121,7 +135,9 @@ class BAR(BaseModel):
         self.embeddings = nn.Linear(config.model.vq_model.vision_hidden_size, embed_dim)
 
         # Learnable unconditional/dropped condition embedding for classifier-free guidance
-        self.none_condition_embedding = nn.Parameter(torch.randn(1, config.model.vq_model.vision_hidden_size) * 0.02)
+        self.none_condition_embedding = nn.Parameter(
+            torch.randn(1, config.model.vq_model.vision_hidden_size) * 0.02
+        )
 
         # Efficient input embedding: per-channel then merge
         self.input_embeddings = nn.Embedding(
@@ -315,9 +331,7 @@ class BAR(BaseModel):
 
         # Prepare positional embeddings with shuffling
         pos_embed = self.pos_embed.repeat(input_ids.shape[0], 1, 1)
-        prefix = (
-            1 + self.condition_seq_len
-        )  # cls_token + repeated condition tokens
+        prefix = 1 + self.condition_seq_len  # cls_token + repeated condition tokens
         pos_embed_prefix = pos_embed[:, :prefix]
         pos_embed_postfix = self.shuffle(
             pos_embed[:, prefix : prefix + self.text_seq_len], orders

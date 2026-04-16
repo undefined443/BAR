@@ -18,7 +18,8 @@
         "training.num_train_steps=10",
         "training.log_every_n_steps=1",
         "training.compile_model=false",
-        "training.enable_wandb=false"
+        "training.enable_wandb=false",
+        "model.generator.mbm_head.use_ddim=true"
       ],
       "env": {
         "CUDA_VISIBLE_DEVICES": "0"

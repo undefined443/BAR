@@ -74,10 +74,8 @@ class MaskBitModelingHead(nn.Module):
         # Always use RMSNorm and SwiGLU
         norm_layer = RMSNorm
 
-        # Input projection
-        self.input_proj = nn.Linear(
-            math.ceil(self.width / self.seq_len) * self.seq_len, self.width, bias=True
-        )
+        # Input projection from continuous analog bits [B, seq_len] -> [B, width]
+        self.input_proj = nn.Linear(seq_len, self.width, bias=True)
         self.ln_pre = norm_layer(self.width)
 
         # Transformer blocks with SwiGLU (mlp_ratio=4.0 hardcoded)
@@ -175,7 +173,7 @@ class MaskBitModelingHead(nn.Module):
             x = self.transformer[i](x, c=s)
 
         x = self.adaln_before_head(x, s)
-        x = self.output_embed(x)
+        x = self.output_embed(x)  # [B, seq_len]
         return x
 
     def forward(self, target, conditions):
