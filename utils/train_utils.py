@@ -67,7 +67,7 @@ def get_pretrained_tokenizer(config):
     """
     # Load CLIP text tokenizer
     clip_model_name = getattr(
-        config.experiment, "clip_model_name", "openai/clip-vit-large-patch14"
+        config.experiment, "clip_model_name", "google/siglip2-so400m-patch16-512"
     )
     tokenizer = CLIPTextTokenizer(model_name=clip_model_name)
     tokenizer.eval()

@@ -146,9 +146,6 @@ def main():
     if config.training.get("compile_model", False):
         logger.info("Compiling generator with torch.compile")
         model = torch.compile(model)
-        if tokenizer_encode_fn is not None:
-            logger.info("Compiling tokenizer encode() with torch.compile")
-            tokenizer_encode_fn = torch.compile(tokenizer_encode_fn)
         # loss_module is nn.Identity() for BAR, no need to compile
     if config.training.use_ema:
         ema_model.to(accelerator.device)

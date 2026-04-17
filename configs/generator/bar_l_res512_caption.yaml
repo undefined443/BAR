@@ -9,14 +9,14 @@ experiment:
   log_every: 50
   log_grad_norm_every: 1000
   resume: true
-  clip_model_name: openai/clip-vit-large-patch14
+  clip_model_name: google/siglip2-so400m-patch16-512
 
 model:
   vq_model:
     codebook_size: 1024
     token_size: 16
     vit_dec_patch_size: 16
-    vision_hidden_size: 1024  # CLIP last_hidden_state dim
+    vision_hidden_size: 1152  # SigLIP2 so400m last_hidden_state dim
 
   generator:
     hidden_size: 1280
@@ -24,7 +24,7 @@ model:
     num_attention_heads: 16
     class_label_dropout: 0.1
     text_seq_len: 77
-    condition_num_classes: 1000
+    condition_seq_len: 1024  # SigLIP2 512x512 / patch16 = 32x32 = 1024 tokens
     target_codebook_size: 2
     use_checkpoint: false
     randomness_anneal_start: 62500

@@ -1,24 +1,22 @@
-"""CLIP text tokenizer for text diffusion models."""
+"""SigLIP2 vision encoder + CLIP text tokenizer for caption training."""
 
 import torch
+from transformers import AutoModel, CLIPTokenizer, SiglipImageProcessor
 
 
 class CLIPTextTokenizer:
-    """Wrapper for CLIP text tokenizer for text diffusion models."""
+    """Wrapper for CLIP text tokenizer + SigLIP2 vision encoder."""
 
-    def __init__(self, model_name="jinaai/jina-clip-v2"):
-        """Initialize CLIP text tokenizer.
-
-        Args:
-            model_name: HuggingFace model name for CLIP.
-        """
-        from transformers import CLIPTokenizer, CLIPModel, CLIPImageProcessor
-
-        self.tokenizer = CLIPTokenizer.from_pretrained(model_name)
-        self.model = CLIPModel.from_pretrained(model_name)
-        self.image_processor = CLIPImageProcessor.from_pretrained(model_name)
+    def __init__(self, model_name="google/siglip2-so400m-patch16-512"):
+        self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+        full_model = AutoModel.from_pretrained(model_name)
+        self.model = full_model.vision_model
+        self.image_processor = SiglipImageProcessor(
+            size={"height": 512, "width": 512}, do_resize=False
+        )
         self.device = torch.device("cuda")
         self.model.eval()
+        del full_model
 
     def to(self, device):
         """Move model to device."""
@@ -27,7 +25,7 @@ class CLIPTextTokenizer:
         return self
 
     def train(self):
-        """Set model to train mode (no-op for text tokenizer)."""
+        """Set model to train mode (no-op for tokenizer)."""
         return self
 
     def eval(self):
@@ -40,16 +38,16 @@ class CLIPTextTokenizer:
 
         Args:
             texts: List of text strings or single text string.
-            images: List of image tensors or single image tensor.
+            images: (B, 3, H, W) tensor in [-1, 1].
 
         Returns:
             Tuple of (text_token_bits, image_embeddings).
-            text_token_bits: (B, L, token_size) binary representation of token IDs
+            text_token_bits: (B, L, token_size) binary representation of token IDs.
+            image_embeddings: (B, num_patches, hidden_size) from SigLIP2 vision model.
         """
         if isinstance(texts, str):
             texts = [texts]
 
-        # Tokenize texts
         with torch.no_grad():
             inputs = self.tokenizer(
                 texts,
@@ -61,16 +59,12 @@ class CLIPTextTokenizer:
             token_ids = inputs["input_ids"].to(self.device)
             token_bits = self.token_ids_to_bits(token_ids)
 
-            # Rescale images from [-1, 1] to [0, 1] for CLIP image processor
-            do_rescale = True
-            if isinstance(images, torch.Tensor):
-                images = (images * 0.5 + 0.5).clamp(0, 1)
-                do_rescale = False
-            # Get embeddings from CLIP
+            # Rescale from [-1, 1] to [0, 1] before passing to SiglipImageProcessor
+            images_rescaled = (images * 0.5 + 0.5).clamp(0, 1)
             processed_images = self.image_processor(
-                images, return_tensors="pt", do_rescale=do_rescale
+                images=images_rescaled, return_tensors="pt", do_rescale=False
             )["pixel_values"].to(self.device)
-            outputs = self.model.vision_model(pixel_values=processed_images)
+            outputs = self.model(pixel_values=processed_images)
             image_embeddings = outputs.last_hidden_state
 
         return token_bits, image_embeddings
