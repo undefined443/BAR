@@ -1,44 +1,47 @@
 experiment:
-  project: bar
+  project: bar-caption
   name: bar_b_patch4
   output_dir: bar_b_patch4
-  max_train_examples: 1281167
-  save_every: 50000
+  max_train_examples: 1281167  # TODO
+  save_every: 40
   eval_every: 5000000
   generate_every: 5000
   log_every: 50
   log_grad_norm_every: 1000
   resume: true
-  tokenizer_checkpoint: assets/tokenizer/bar_fsq_16bits.bin
 
 model:
   vq_model:
-    codebook_size: 65536
+    name: google/siglip2-so400m-patch16-256
+    codebook_size: 1024
     token_size: 16
     vit_dec_patch_size: 16
+    vision_hidden_size: 1152  # SigLIP2 so400m last_hidden_state dim
   generator:
     hidden_size: 768
     num_hidden_layers: 24
     num_attention_heads: 12
     class_label_dropout: 0.1
-    image_seq_len: 256
-    condition_num_classes: 1000
+    text_seq_len: 76
+    condition_seq_len: 256  # SigLIP2 256x256 / patch16 = 16x16 = 256 tokens
     target_codebook_size: 2
     use_checkpoint: false
     randomness_anneal_start: 125000
     randomness_anneal_end: 187500
     repeat_class_condition: 32
     patch_size: 4
+    dropout: 0.2
+    attn_drop: 0.2
     guidance_scale: 5.0
     mbm_head:
       width: 2048
       num_layers: 3
       randomize_temperature: 2.0
       tokens_allocation: [64, 64, 64, 64]
+      use_ddim: true
 
 dataset:
   params:
-    pretokenization: /path/to/pretokenized_npz
     train_shards_path_or_url: /path/to/imagenet-train-{000000..000320}.tar
     eval_shards_path_or_url: /path/to/imagenet-val-{000000..000049}.tar
     num_workers_per_gpu: 12

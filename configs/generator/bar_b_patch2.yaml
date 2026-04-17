@@ -1,5 +1,5 @@
 experiment:
-  project: bar
+  project: bar-caption
   name: bar_b_patch2
   output_dir: bar_b_patch2
   max_train_examples: 1281167
@@ -9,20 +9,21 @@ experiment:
   log_every: 50
   log_grad_norm_every: 1000
   resume: true
-  tokenizer_checkpoint: assets/tokenizer/bar_fsq_16bits.bin
 
 model:
   vq_model:
+    name: google/siglip2-so400m-patch16-256
     codebook_size: 65536
     token_size: 16
     vit_dec_patch_size: 16
+    vision_hidden_size: 1152  # SigLIP2 so400m last_hidden_state dim
   generator:
     hidden_size: 768
     num_hidden_layers: 24
     num_attention_heads: 12
     class_label_dropout: 0.1
-    image_seq_len: 256
-    condition_num_classes: 1000
+    text_seq_len: 76
+    condition_seq_len: 256  # SigLIP2 256x256 / patch16 = 16x16 = 256 tokens
     target_codebook_size: 2
     use_checkpoint: false
     randomness_anneal_start: 125000
