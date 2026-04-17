@@ -44,7 +44,7 @@ class BAR(BaseModel):
             raise ValueError("latent grid dimensions must be divisible by patch_size.")
 
         self.latent_width = latent_width
-        self.text_seq_len = config.model.generator.get("text_seq_len", 77)
+        self.text_seq_len = self.original_text_seq_len // self.patch_size
 
         target_codebook_size = config.model.generator.target_codebook_size
 

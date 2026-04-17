@@ -66,11 +66,11 @@ def get_pretrained_tokenizer(config):
         Loaded CLIPTextTokenizer in eval mode with gradients disabled.
     """
     # Load CLIP text tokenizer
-    clip_model_name = getattr(
-        config.experiment, "clip_model_name", "google/siglip2-so400m-patch16-512"
+    model_name = getattr(
+        config.model.vq_model, "name", "google/siglip2-so400m-patch16-512"
     )
     text_seq_len = config.model.generator.get("text_seq_len", 77)
-    tokenizer = CLIPTextTokenizer(model_name=clip_model_name, text_seq_len=text_seq_len)
+    tokenizer = CLIPTextTokenizer(model_name=model_name, text_seq_len=text_seq_len)
     tokenizer.eval()
 
     # Disable gradients for inference
@@ -626,9 +626,12 @@ def train_one_epoch(
                 accelerator.wait_for_everyone()
 
             # Generate images.
+            is_caption_model = getattr(config.model.vq_model, "name", None) is not None
             if (
-                global_step + 1
-            ) % config.experiment.generate_every == 0 and accelerator.is_main_process:
+                (global_step + 1) % config.experiment.generate_every == 0
+                and accelerator.is_main_process
+                and not is_caption_model
+            ):
                 # Store the model parameters temporarily and load the EMA parameters to perform inference.
                 if config.training.get("use_ema", False):
                     ema_model.store(model.parameters())
@@ -864,9 +867,12 @@ def generator_train_one_epoch(
                 accelerator.wait_for_everyone()
 
             # Generate images.
+            is_caption_model = getattr(config.model.vq_model, "name", None) is not None
             if (
-                global_step + 1
-            ) % config.experiment.generate_every == 0 and accelerator.is_main_process:
+                (global_step + 1) % config.experiment.generate_every == 0
+                and accelerator.is_main_process
+                and not is_caption_model
+            ):
                 # Generate images with non-EMA model
                 generate_images(
                     model,
