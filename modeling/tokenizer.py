@@ -7,8 +7,9 @@ from transformers import AutoModel, CLIPTokenizer, SiglipImageProcessor
 class CLIPTextTokenizer:
     """Wrapper for CLIP text tokenizer + SigLIP2 vision encoder."""
 
-    def __init__(self, model_name="google/siglip2-so400m-patch16-512"):
+    def __init__(self, model_name="google/siglip2-so400m-patch16-512", text_seq_len=77):
         self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+        self.text_seq_len = text_seq_len
         full_model = AutoModel.from_pretrained(model_name)
         self.model = full_model.vision_model
         self.image_processor = SiglipImageProcessor(
@@ -52,7 +53,7 @@ class CLIPTextTokenizer:
             inputs = self.tokenizer(
                 texts,
                 padding="max_length",
-                max_length=77,
+                max_length=self.text_seq_len,
                 return_tensors="pt",
                 truncation=True,
             )

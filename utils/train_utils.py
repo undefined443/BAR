@@ -69,7 +69,8 @@ def get_pretrained_tokenizer(config):
     clip_model_name = getattr(
         config.experiment, "clip_model_name", "google/siglip2-so400m-patch16-512"
     )
-    tokenizer = CLIPTextTokenizer(model_name=clip_model_name)
+    text_seq_len = config.model.generator.get("text_seq_len", 77)
+    tokenizer = CLIPTextTokenizer(model_name=clip_model_name, text_seq_len=text_seq_len)
     tokenizer.eval()
 
     # Disable gradients for inference
