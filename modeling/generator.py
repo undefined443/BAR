@@ -450,7 +450,7 @@ class BAR(BaseModel):
             if target_rope_order is not None:
                 target_rope_order = target_rope_order[:, -1:]
 
-        for idx, blk in enumerate(self.blocks):
+        for blk in self.blocks:
             if self.use_checkpoint:
                 x = torch.utils.checkpoint.checkpoint(
                     blk.forward,
@@ -530,9 +530,14 @@ class BAR(BaseModel):
 
             # Forward pass with or without CFG at BAR level
             if use_cfg:
+                none_condition = (
+                    self.get_none_condition(condition)
+                    .unsqueeze(1)
+                    .expand(-1, condition.shape[1], -1)
+                )
                 latent_conditions = self.forward_fn(
                     torch.cat([ids, ids], dim=0),
-                    torch.cat([condition, self.get_none_condition(condition)], dim=0),
+                    torch.cat([condition, none_condition], dim=0),
                     orders=cfg_orders,
                     is_sampling=True,
                 )[:, -1].reshape(-1, 1, self.lm_head.width)

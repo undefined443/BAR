@@ -196,7 +196,9 @@ class MaskBitModelingHead(nn.Module):
             return loss
 
     @torch.no_grad()
-    def sample(self, conditions, guidance_scale=3.0, num_steps=50, use_cfg=False):
+    def sample(
+        self, conditions, guidance_scale=3.0, num_steps=50, use_cfg=False, **kwargs
+    ):
         """Sample tokens using DDIM denoising.
 
         Args:
@@ -206,6 +208,7 @@ class MaskBitModelingHead(nn.Module):
             guidance_scale: CFG guidance scale. Used when use_cfg=True.
             num_steps: Number of DDIM denoising steps.
             use_cfg: Whether to apply CFG. If True, conditions should be doubled.
+            **kwargs: Ignored. Accepted for compatibility with MaskBitModelingHead.sample().
         """
         device = conditions.device
 

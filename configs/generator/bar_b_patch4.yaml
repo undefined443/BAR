@@ -12,8 +12,9 @@ experiment:
 
 model:
   vq_model:
-    name: google/siglip2-so400m-patch16-256
-    codebook_size: 1024
+    tokenizer: openai/clip-vit-large-patch14
+    encoder: google/siglip2-so400m-patch16-256
+    codebook_size: 65536
     token_size: 16
     vit_dec_patch_size: 16
     vision_hidden_size: 1152  # SigLIP2 so400m last_hidden_state dim

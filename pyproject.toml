@@ -40,4 +40,4 @@ flash-attn = { url = "https://github.com/mjun0812/flash-attention-prebuild-wheel
 [[tool.uv.index]]
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cu130"
-explicit = false
+explicit = true

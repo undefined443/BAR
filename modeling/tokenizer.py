@@ -1,38 +1,43 @@
 """SigLIP2 vision encoder + CLIP text tokenizer for caption training."""
 
 import torch
+import torch.nn as nn
 from transformers import AutoModel, CLIPTokenizer, SiglipImageProcessor
+from omegaconf import OmegaConf
+
+from .modules import SigLIP2Decoder
 
 
-class CLIPTextTokenizer:
+class BAR_FSQ(nn.Module):
     """Wrapper for CLIP text tokenizer + SigLIP2 vision encoder."""
 
-    def __init__(self, model_name="google/siglip2-so400m-patch16-512", text_seq_len=77):
-        self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
-        self.text_seq_len = text_seq_len
-        full_model = AutoModel.from_pretrained(model_name)
-        self.model = full_model.vision_model
-        self.image_processor = SiglipImageProcessor(
-            size={"height": 512, "width": 512}, do_resize=False
-        )
-        self.device = torch.device("cuda")
-        self.model.eval()
+    def __init__(self, config):
+
+        if isinstance(config, dict):
+            config = OmegaConf.create(config)
+
+        super().__init__()
+        self.config = config
+
+        self.decoder = SigLIP2Decoder(config)
+
+        self.tokenizer = CLIPTokenizer.from_pretrained(config.model.vq_model.tokenizer)
+        self.text_seq_len = config.model.generator.text_seq_len
+
+        full_model = AutoModel.from_pretrained(config.model.vq_model.encoder)
+        self.encoder = full_model.vision_model
+
+        # Freeze the SigLIP2 model
+        self.encoder.eval()
+        self.encoder.requires_grad_(False)
+        self.encoder.head.requires_grad_(False)
+
         del full_model
 
-    def to(self, device):
-        """Move model to device."""
-        self.device = device
-        self.model = self.model.to(device)
-        return self
-
-    def train(self):
-        """Set model to train mode (no-op for tokenizer)."""
-        return self
-
-    def eval(self):
-        """Set model to eval mode."""
-        self.model.eval()
-        return self
+        crop_size = config.dataset.preprocessing.crop_size
+        self.image_processor = SiglipImageProcessor(
+            size={"height": crop_size, "width": crop_size}, do_resize=False
+        )
 
     def encode(self, texts, images):
         """Encode texts to binary bits and images to embeddings.
@@ -57,18 +62,33 @@ class CLIPTextTokenizer:
                 return_tensors="pt",
                 truncation=True,
             )
-            token_ids = inputs["input_ids"].to(self.device)
+            token_ids = inputs["input_ids"].to(images.device)
             token_bits = self.token_ids_to_bits(token_ids)
 
             # Rescale from [-1, 1] to [0, 1] before passing to SiglipImageProcessor
             images_rescaled = (images * 0.5 + 0.5).clamp(0, 1)
             processed_images = self.image_processor(
                 images=images_rescaled, return_tensors="pt", do_rescale=False
-            )["pixel_values"].to(self.device)
-            outputs = self.model(pixel_values=processed_images)
+            )["pixel_values"].to(images.device)
+            outputs = self.encoder(pixel_values=processed_images)
             image_embeddings = outputs.last_hidden_state
 
         return token_bits, image_embeddings
+
+    def decode_tokens(self, token_bits):
+        """Decode discrete token indices to text strings.
+
+        Args:
+            token_bits: Binary representation of token IDs (B, N * token_size).
+
+        Returns:
+            texts: Decoded text strings.
+        """
+        # Convert bit representation back to token IDs for tokenizer decoding
+        token_bits = token_bits.view(token_bits.shape[0], self.text_seq_len, -1)
+        token_ids = self.bits_to_token_ids(token_bits)
+        texts = self.tokenizer.batch_decode(token_ids, skip_special_tokens=True)
+        return texts
 
     def token_ids_to_bits(self, token_ids, token_size=16):
         """Convert token IDs to binary bits.
@@ -102,3 +122,6 @@ class CLIPTextTokenizer:
         shifts = torch.arange(token_size, device=bits.device, dtype=torch.long)
         token_ids = (bits.long() << shifts).sum(dim=-1)
         return token_ids
+
+    def forward(self, input):
+        return self.encode(input)

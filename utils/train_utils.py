@@ -20,7 +20,7 @@ from modeling.generator import BAR
 from evaluator import VQGANEvaluator
 
 from utils.viz_utils import make_viz_from_samples, make_viz_from_samples_generation
-from modeling.tokenizer import CLIPTextTokenizer
+from modeling.tokenizer import BAR_FSQ
 
 
 def get_config():
@@ -57,27 +57,19 @@ class AverageMeter(object):
 
 
 def get_pretrained_tokenizer(config):
-    """Load pretrained text tokenizer for text diffusion.
+    """Load pretrained tokenizer.
 
     Args:
-        config: Config object.
+        config: Config object. If config.tokenizer_config is specified,
+                the model.vq_model section should already be merged into config.
 
     Returns:
-        Loaded CLIPTextTokenizer in eval mode with gradients disabled.
+        Loaded tokenizer model in eval mode with gradients disabled.
     """
-    # Load CLIP text tokenizer
-    model_name = getattr(
-        config.model.vq_model, "name", "google/siglip2-so400m-patch16-512"
-    )
-    text_seq_len = config.model.generator.get("text_seq_len", 77)
-    tokenizer = CLIPTextTokenizer(model_name=model_name, text_seq_len=text_seq_len)
-    tokenizer.eval()
-
-    # Disable gradients for inference
-    for param in tokenizer.model.parameters():
-        param.requires_grad = False
-
-    return tokenizer
+    model = BAR_FSQ(config)
+    model.eval()
+    model.requires_grad_(False)
+    return model
 
 
 def create_model_and_loss_module(config, logger, accelerator):
@@ -1136,22 +1128,6 @@ def sample_images(
     tokenizer.eval()
     if device is None:
         device = accelerator.device
-
-    if labels is None:
-        # goldfish, chicken, tiger, cat, hourglass, ship, dog, race car, airliner, teddy bear, random
-        labels = [
-            1,
-            7,
-            282,
-            604,
-            724,
-            179,
-            751,
-            404,
-            850,
-            torch.randint(0, 999, size=(1,)),
-        ] * (num_samples // 10)
-        labels = torch.LongTensor(labels).to(device)
 
     if accelerator is None:
         unwrap_generator = generator

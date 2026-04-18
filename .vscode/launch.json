@@ -32,6 +32,7 @@
       "justMyCode": false,
       "args": [
         "config=configs/generator/bar_b_patch4.yaml",
+        "dataset.params.eval_shards_path_or_url=${input:shards_path}",
         "experiment.output_dir=bar_b_patch4",
         "experiment.generator_checkpoint=bar_b_patch4/checkpoint-latest/unwrapped_model/pytorch_model.bin",
         "model.generator.guidance_scale=9.6",
@@ -43,7 +44,7 @@
         "WORLD_SIZE": "1",
         "LOCAL_RANK": "0",
         "MASTER_ADDR": "localhost",
-        "MASTER_PORT": "29500"
+        "MASTER_PORT": "0"
       },
       "envFile": "${workspaceFolder}/.env"
     }
