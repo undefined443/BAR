@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Smoke Test: Generator",
+      "name": "train_bar",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/train_bar.py",
@@ -22,7 +22,31 @@
         "model.generator.mbm_head.use_ddim=true"
       ],
       "env": {
-        "CUDA_VISIBLE_DEVICES": "0"
+        "CUDA_VISIBLE_DEVICES": "1"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "sample_imagenet",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/sample_imagenet.py",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "config=configs/generator/bar_b_patch4.yaml",
+        "experiment.output_dir=bar_b_patch4",
+        "experiment.generator_checkpoint=bar_b_patch4/checkpoint-latest/unwrapped_model/pytorch_model.bin",
+        "model.generator.guidance_scale=9.6",
+        "model.generator.mbm_head.randomize_temperature=1.4",
+        "model.generator.mbm_head.tokens_allocation=[64,64,64,64]"
+      ],
+      "env": {
+        "RANK": "0",
+        "WORLD_SIZE": "1",
+        "LOCAL_RANK": "0",
+        "MASTER_ADDR": "localhost",
+        "MASTER_PORT": "29500"
       },
       "envFile": "${workspaceFolder}/.env"
     }
