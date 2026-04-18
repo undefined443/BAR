@@ -21,9 +21,6 @@
         "training.enable_wandb=false",
         "model.generator.mbm_head.use_ddim=true"
       ],
-      "env": {
-        "CUDA_VISIBLE_DEVICES": "1"
-      },
       "envFile": "${workspaceFolder}/.env"
     },
     {
