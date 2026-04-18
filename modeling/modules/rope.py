@@ -49,8 +49,8 @@ class RotaryEmbeddingFast(nn.Module):
         freqs = freqs.repeat_interleave(2, dim=-1)
 
         # Precompute cos and sin for numerical stability
-        self.register_buffer("freqs_cos", freqs.cos())
-        self.register_buffer("freqs_sin", freqs.sin())
+        self.register_buffer("freqs_cos", freqs.cos(), persistent=False)
+        self.register_buffer("freqs_sin", freqs.sin(), persistent=False)
 
     @torch.amp.autocast(device_type="cuda", enabled=False)
     def forward(self, t, rope_order=None):

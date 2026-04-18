@@ -3,7 +3,7 @@ experiment:
   name: bar_b_patch4
   output_dir: bar_b_patch4
   max_train_examples: 1281167  # TODO
-  save_every: 40
+  save_every: 8000
   eval_every: 5000000
   generate_every: 5000
   log_every: 50
