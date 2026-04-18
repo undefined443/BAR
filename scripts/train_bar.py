@@ -37,23 +37,6 @@ def main():
 
     config = get_config()
 
-    # If tokenizer_config is provided, merge the model.vq_model section from it
-    if config.get("tokenizer_config", None):
-        tokenizer_config_path = config.tokenizer_config
-        print(f"Loading tokenizer config from: {tokenizer_config_path}")
-        tokenizer_config = OmegaConf.load(tokenizer_config_path)
-
-        # Copy the vq_model configuration from tokenizer config
-        if "model" in tokenizer_config and "vq_model" in tokenizer_config.model:
-            print("Copying model.vq_model configuration from tokenizer config")
-            if "model" not in config:
-                config.model = OmegaConf.create({})
-            # Merge instead of replace to allow overrides in generator config
-            config.model.vq_model = OmegaConf.merge(
-                tokenizer_config.model.vq_model, config.model.get("vq_model", {})
-            )
-        else:
-            print("Warning: tokenizer config does not contain model.vq_model section")
     # Enable TF32 on Ampere GPUs.
     if config.training.enable_tf32:
         torch.backends.cuda.matmul.allow_tf32 = True

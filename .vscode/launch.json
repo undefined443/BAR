@@ -9,7 +9,7 @@
       "console": "integratedTerminal",
       "justMyCode": false,
       "args": [
-        "config=configs/generator/bar_l_res512_caption.yaml",
+        "config=configs/generator/bar_b_patch4.yaml",
         "dataset.params.train_shards_path_or_url=${input:shards_path}",
         "dataset.params.eval_shards_path_or_url=${input:shards_path}",
         "dataset.params.num_workers_per_gpu=1",
