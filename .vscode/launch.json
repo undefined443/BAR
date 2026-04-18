@@ -1,0 +1,60 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "train_bar",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/train_bar.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "config=configs/generator/bar_b_patch4.yaml",
+        "dataset.params.train_shards_path_or_url=${input:shards_path}",
+        "dataset.params.eval_shards_path_or_url=${input:shards_path}",
+        "dataset.params.num_workers_per_gpu=1",
+        "training.gradient_accumulation_steps=1",
+        "training.per_gpu_batch_size=1",
+        "training.num_train_steps=10",
+        "training.log_every_n_steps=1",
+        "training.compile_model=false",
+        "training.enable_wandb=false",
+      ],
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "sample_imagenet",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/sample_imagenet.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "config=configs/generator/bar_b_patch4.yaml",
+        "dataset.params.eval_shards_path_or_url=${input:shards_path}",
+        "experiment.output_dir=bar_b_patch4",
+        "experiment.generator_checkpoint=assets/generator/bar_b_patch4.bin",
+        "model.generator.guidance_scale=9.6",
+        "model.generator.mbm_head.randomize_temperature=1.4",
+        "model.generator.mbm_head.tokens_allocation=[64,64,64,64]"
+      ],
+      "env": {
+        "RANK": "0",
+        "WORLD_SIZE": "1",
+        "LOCAL_RANK": "0",
+        "MASTER_ADDR": "localhost",
+        "MASTER_PORT": "0"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "shards_path",
+      "type": "promptString",
+      "description": "Dataset shards path)"
+    }
+  ]
+}

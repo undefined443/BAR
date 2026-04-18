@@ -1,10 +1,29 @@
-.worktree
-assets
-bar_*
-__pycache__
-pretokenized_npz*
-ImageNet-1K-wds
-uv.lock
-wandb
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
 .python-version
+
+# Environment & secrets
+.env
+
+# uv
+uv.lock
+
+# Dataset
+imagenet-1k-wds/
+pretokenized_npz*
+*.tar
+
+# Experiment outputs
+bar_*/
+wandb/
 *.log
+
+# Assets (model weights)
+assets/
+
+# Git worktrees
+.worktree
