@@ -217,6 +217,7 @@ class SimpleImageDataset:
         # Create eval dataset and loader.
         pipeline = [
             wds.SimpleShardList(eval_shards_path),
+            wds.split_by_node,
             wds.split_by_worker,
             wds.tarfile_to_samples(handler=wds.ignore_and_continue),
             *test_processing_pipeline,

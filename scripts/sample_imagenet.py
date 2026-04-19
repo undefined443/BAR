@@ -150,9 +150,17 @@ def main():
 
         total += global_batch_size
 
-    refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
-    metrics = compute_metrics(preds, refs)
-    logger.info("Metrics: " + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()]))
+    all_preds_list = [None] * world_size
+    dist.all_gather_object(all_preds_list, preds)
+    if rank == 0:
+        merged_preds = {}
+        for d in all_preds_list:
+            merged_preds.update(d)
+        refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
+        metrics = compute_metrics(merged_preds, refs)
+        logger.info(
+            "Metrics: " + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
+        )
 
     # Make sure all processes have finished saving their samples before creating npz
     dist.barrier()
