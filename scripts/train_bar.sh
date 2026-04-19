@@ -7,9 +7,6 @@ source .env
 uv run accelerate launch \
     --num_machines=1 \
     --num_processes=8 \
-    --machine_rank=0 \
-    --main_process_ip=10.240.16.7 \
-    --main_process_port=9999 \
     scripts/train_bar.py \
     config=configs/generator/bar_b_patch4.yaml \
     dataset.params.train_shards_path_or_url="$TRAIN_SHARDS_DIR/train-{00000..00113}.tar" \

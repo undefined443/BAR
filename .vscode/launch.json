@@ -27,7 +27,7 @@
       "name": "sample_imagenet",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/sample_imagenet.py",
+      "program": "${workspaceFolder}/scripts/sample_imagenet.py",
       "console": "integratedTerminal",
       "justMyCode": true,
       "args": [
