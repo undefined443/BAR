@@ -2,13 +2,63 @@ from omegaconf import OmegaConf
 from types import SimpleNamespace
 import torch
 import torch.distributed as dist
-from PIL import Image
 import os
 import time
+import webdataset as wds
+from pycocoevalcap.bleu.bleu import Bleu
+from pycocoevalcap.meteor.meteor import Meteor
+from pycocoevalcap.cider.cider import Cider
 
 from utils.logger import setup_logger
 from utils.train_utils import create_dataloader, get_pretrained_tokenizer
 from modeling.generator import BAR
+
+
+def load_refs_from_wds(eval_shards):
+    """Load all reference captions from the eval WDS shards.
+
+    Returns:
+        dict mapping image_id (int) -> list of reference caption strings,
+        in the format expected by pycocoevalcap scorers.
+    """
+    refs = {}
+
+    dataset = wds.WebDataset(eval_shards, shardshuffle=False).decode()
+    for sample in dataset:
+        image_id = int(sample["__key__"])
+        raw = sample["json"]
+        candidates = raw["captions"]
+        captions = [str(c).strip() for c in candidates]
+        refs[image_id] = captions
+
+    return refs
+
+
+def compute_metrics(preds, refs):
+    metrics = {}
+
+    # BLEU
+    scorer = Bleu(4)
+    score, _ = scorer.compute_score(refs, preds)
+    metrics["BLEU-4"] = score[3]
+
+    # METEOR
+    scorer = Meteor()
+    score, _ = scorer.compute_score(refs, preds)
+    metrics["METEOR"] = score
+
+    # ROUGE-L
+    # metrics["ROUGE-L"] = None
+
+    # CIDEr
+    scorer = Cider()
+    score, _ = scorer.compute_score(refs, preds)
+    metrics["CIDEr"] = score * 100
+
+    # SPICE
+    # metrics["SPICE"] = None
+
+    return metrics
 
 
 def get_config_cli():
@@ -93,7 +143,8 @@ def main():
     # Benchmark variables
     warmup_batches = 10 if sample_speed_benchmark else 0
     start_time = None
-    benchmark_texts = 0
+    benchmark_captions = 0
+    preds = {}
 
     for batch_idx, batch in enumerate(eval_dataloader):
         # Start timing after warmup batches
@@ -112,6 +163,7 @@ def main():
             memory_format=torch.contiguous_format,
             non_blocking=True,
         )
+        image_ids = [int(k) for k in batch["__key__"]]
 
         with torch.no_grad():
             input_tokens, conditions = tokenizer_encode_fn(captions, images)
@@ -125,20 +177,28 @@ def main():
             tokens_allocation=tokens_allocation,
         )
 
-        generated_texts = tokenizer.decode_tokens(generated_tokens)
+        generated_captions = tokenizer.decode_tokens(generated_tokens)
+
+        preds.update(
+            {image_id: [cap] for image_id, cap in zip(image_ids, generated_captions)}
+        )
 
         if not sample_speed_benchmark:
-            for i, sample in enumerate(generated_texts):
+            for i, sample in enumerate(generated_captions):
                 index = i * dist.get_world_size() + rank + total
                 filename = f"{index:06d}.txt"
                 with open(f"{sample_folder_dir}/{filename}", "w") as f:
                     f.write(sample)
 
-        # Count texts after warmup for benchmark
+        # Count captions after warmup for benchmark
         if sample_speed_benchmark and batch_idx >= warmup_batches:
-            benchmark_texts += global_batch_size
+            benchmark_captions += global_batch_size
 
         total += global_batch_size
+
+    refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
+    metrics = compute_metrics(preds, refs)
+    logger.info("Metrics: " + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()]))
 
     # Make sure all processes have finished saving their samples before creating npz
     dist.barrier()
@@ -154,14 +214,16 @@ def main():
         max_elapsed = elapsed_tensor.item()
 
         if rank == 0:
-            texts_per_sec = benchmark_texts / max_elapsed
+            captions_per_sec = benchmark_captions / max_elapsed
             print(f"\n{'=' * 60}")
             print("Speed Benchmark Results:")
             print(f"  Warmup batches: {warmup_batches} (skipped from timing)")
-            print(f"  Benchmarked texts: {benchmark_texts}")
+            print(f"  Benchmarked captions: {benchmark_captions}")
             print(f"  Total time: {max_elapsed:.2f} seconds")
-            print(f"  Throughput: {texts_per_sec:.2f} texts/sec")
-            print(f"  Per-GPU throughput: {texts_per_sec / world_size:.2f} texts/sec")
+            print(f"  Throughput: {captions_per_sec:.2f} captions/sec")
+            print(
+                f"  Per-GPU throughput: {captions_per_sec / world_size:.2f} captions/sec"
+            )
             print(f"{'=' * 60}")
     else:
         if rank == 0:

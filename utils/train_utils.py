@@ -5,8 +5,7 @@ import os
 import time
 import math
 from pathlib import Path
-import pprint
-from collections import defaultdict
+import wandb
 
 from data import SimpleImageDataset, CachedTokensFolder
 import torch
@@ -19,7 +18,8 @@ from modeling.modules import EMAModel
 from modeling.generator import BAR
 from evaluator import VQGANEvaluator
 
-from utils.viz_utils import make_viz_from_samples, make_viz_from_samples_generation
+import torchvision.transforms.functional as TVF
+
 from modeling.tokenizer import BAR_FSQ
 
 
@@ -407,294 +407,6 @@ def auto_resume(
     return global_step, first_epoch, wandb_run_id
 
 
-def train_one_epoch(
-    config,
-    logger,
-    accelerator,
-    model,
-    ema_model,
-    loss_module,
-    optimizer,
-    discriminator_optimizer,
-    lr_scheduler,
-    discriminator_lr_scheduler,
-    train_dataloader,
-    eval_dataloader,
-    evaluator,
-    global_step,
-    wandb_run_id=None,
-):
-    """One epoch training."""
-    batch_time_meter = AverageMeter()
-    data_time_meter = AverageMeter()
-    end = time.time()
-
-    model.train()
-    optimizer.zero_grad(set_to_none=True)
-    if discriminator_optimizer is not None:
-        discriminator_optimizer.zero_grad(set_to_none=True)
-
-    autoencoder_logs = defaultdict(float)
-    discriminator_logs = defaultdict(float)
-    train_generator_next = True
-
-    for _, batch in enumerate(train_dataloader):
-        model.train()
-        images = batch["image"].to(
-            accelerator.device, memory_format=torch.contiguous_format, non_blocking=True
-        )
-        fnames = batch["__key__"]
-        data_time_meter.update(time.time() - end)
-        should_train_discriminator = (
-            global_step >= config.losses.discriminator_start
-            and accelerator.unwrap_model(loss_module).use_discriminator
-        )
-        train_generator = train_generator_next or not should_train_discriminator
-
-        if train_generator:
-            reconstructed_images, extra_results_dict = model(images)
-        else:
-            with torch.no_grad():
-                model.eval()
-                reconstructed_images, extra_results_dict = model(images)
-                model.train()
-
-        if train_generator:
-            autoencoder_logs = defaultdict(float)
-            with accelerator.accumulate([model]):
-                autoencoder_loss, loss_dict = loss_module(
-                    images,
-                    reconstructed_images,
-                    extra_results_dict,
-                    global_step,
-                    mode="generator",
-                )
-
-                # Gather the losses across all processes for logging.
-                autoencoder_logs = {}
-                for k, v in loss_dict.items():
-                    if k in ["discriminator_factor", "d_weight"]:
-                        if isinstance(v, torch.Tensor):
-                            autoencoder_logs["train/" + k] = v.cpu().item()
-                        else:
-                            autoencoder_logs["train/" + k] = v
-                    else:
-                        autoencoder_logs["train/" + k] = (
-                            accelerator.gather(v).mean().item()
-                        )
-
-                accelerator.backward(autoencoder_loss)
-
-                if accelerator.sync_gradients:
-                    if config.training.max_grad_norm is not None:
-                        accelerator.clip_grad_norm_(
-                            model.parameters(), config.training.max_grad_norm
-                        )
-                    optimizer.step()
-                    lr_scheduler.step()
-                    optimizer.zero_grad(set_to_none=True)
-
-                # Log gradient norm before zeroing it.
-                if (
-                    accelerator.sync_gradients
-                    and (global_step + 1) % config.experiment.log_grad_norm_every == 0
-                    and accelerator.is_main_process
-                ):
-                    log_grad_norm(model, accelerator, global_step + 1)
-        else:
-            discriminator_logs = defaultdict(float)
-            with accelerator.accumulate(loss_module):
-                # Discriminator training.
-                discriminator_loss, loss_dict_discriminator = loss_module(
-                    images,
-                    reconstructed_images,
-                    extra_results_dict,
-                    global_step=global_step,
-                    mode="discriminator",
-                )
-
-                # Gather the losses across all processes for logging.
-                for k, v in loss_dict_discriminator.items():
-                    if k in ["logits_real", "logits_fake"]:
-                        if isinstance(v, torch.Tensor):
-                            discriminator_logs["train/" + k] = v.cpu().item()
-                        else:
-                            discriminator_logs["train/" + k] = v
-                    else:
-                        discriminator_logs["train/" + k] = (
-                            accelerator.gather(v).mean().item()
-                        )
-
-                accelerator.backward(discriminator_loss)
-
-                if accelerator.sync_gradients and discriminator_optimizer is not None:
-                    if config.training.max_grad_norm is not None:
-                        accelerator.clip_grad_norm_(
-                            loss_module.parameters(), config.training.max_grad_norm
-                        )
-                    discriminator_optimizer.step()
-                    if discriminator_lr_scheduler is not None:
-                        discriminator_lr_scheduler.step()
-                    discriminator_optimizer.zero_grad(set_to_none=True)
-
-                # Log gradient norm before zeroing it.
-                if (
-                    accelerator.sync_gradients
-                    and (global_step + 1) % config.experiment.log_grad_norm_every == 0
-                    and accelerator.is_main_process
-                ):
-                    log_grad_norm(loss_module, accelerator, global_step + 1)
-
-        # not train_generator specifies we finish both a generator step and a discriminator step
-        if accelerator.sync_gradients:
-            if should_train_discriminator:
-                train_generator_next = not train_generator_next
-            else:
-                train_generator_next = True
-
-            if config.training.use_ema:
-                ema_model.step(model.parameters())
-            batch_time_meter.update(time.time() - end)
-            end = time.time()
-
-            if (global_step + 1) % config.experiment.log_every == 0:
-                samples_per_second_per_gpu = (
-                    config.training.gradient_accumulation_steps
-                    * config.training.per_gpu_batch_size
-                    / batch_time_meter.val
-                )
-
-                lr = lr_scheduler.get_last_lr()[0]
-                dis_lr = (
-                    discriminator_lr_scheduler.get_last_lr()[0]
-                    if discriminator_lr_scheduler is not None
-                    else 0.0
-                )
-
-                log_msg = (
-                    f"Data (t): {data_time_meter.val:0.4f}, {samples_per_second_per_gpu:0.2f}/s/gpu "
-                    f"Batch (t): {batch_time_meter.val:0.4f} "
-                    f"LR: {lr:0.6f} "
-                    f"Step: {global_step + 1} "
-                    f"Total Loss: {autoencoder_logs['train/total_loss']:0.4f} "
-                    f"Recon Loss: {autoencoder_logs['train/reconstruction_loss']:0.4f} "
-                )
-
-                if should_train_discriminator:
-                    log_msg += (
-                        f"Gen GAN Loss: {autoencoder_logs['train/gan_loss']:0.4f} "
-                        f"Discr Loss: {discriminator_logs['train/discriminator_loss']:0.4f} "
-                    )
-
-                logger.info(log_msg)
-                logs = {
-                    "lr": lr,
-                    "lr/generator": lr,
-                    "lr/discriminator": dis_lr,
-                    "samples/sec/gpu": samples_per_second_per_gpu,
-                    "time/data_time": data_time_meter.val,
-                    "time/batch_time": batch_time_meter.val,
-                    # Removed pass_through_ratio - FSQ doesn't have this feature
-                }
-                logs.update(autoencoder_logs)
-                logs.update(discriminator_logs)
-                accelerator.log(logs, step=global_step + 1)
-
-                # Reset batch / data time meters per log window.
-                batch_time_meter.reset()
-                data_time_meter.reset()
-
-            # Save model checkpoint.
-            if (global_step + 1) % config.experiment.save_every == 0:
-                save_checkpoint(
-                    model,
-                    config.experiment.output_dir,
-                    accelerator,
-                    global_step + 1,
-                    logger=logger,
-                    wandb_run_id=wandb_run_id,
-                )
-                # Wait for everyone to save their checkpoint.
-                accelerator.wait_for_everyone()
-
-            # Generate images.
-            is_caption_model = getattr(config.model.vq_model, "name", None) is not None
-            if (
-                (global_step + 1) % config.experiment.generate_every == 0
-                and accelerator.is_main_process
-                and not is_caption_model
-            ):
-                # Store the model parameters temporarily and load the EMA parameters to perform inference.
-                if config.training.get("use_ema", False):
-                    ema_model.store(model.parameters())
-                    ema_model.copy_to(model.parameters())
-
-                reconstruct_images(
-                    model,
-                    images[: config.training.num_generated_images],
-                    fnames[: config.training.num_generated_images],
-                    accelerator,
-                    global_step + 1,
-                    config.experiment.output_dir,
-                    logger=logger,
-                    config=config,
-                )
-
-                if config.training.get("use_ema", False):
-                    # Switch back to the original model parameters for training.
-                    ema_model.restore(model.parameters())
-
-            # Evaluate reconstruction.
-            if (
-                eval_dataloader is not None
-                and (global_step + 1) % config.experiment.eval_every == 0
-            ):
-                logger.info("Computing metrics on the validation set.")
-                if config.training.get("use_ema", False):
-                    ema_model.store(model.parameters())
-                    ema_model.copy_to(model.parameters())
-                    # Eval for EMA.
-                    eval_scores = eval_reconstruction(
-                        model,
-                        eval_dataloader,
-                        accelerator,
-                        evaluator,
-                    )
-                    logger.info(f"EMA EVALUATION Step: {global_step + 1} ")
-                    logger.info(pprint.pformat(eval_scores))
-                    if accelerator.is_main_process:
-                        eval_log = {"ema_eval/" + k: v for k, v in eval_scores.items()}
-                        accelerator.log(eval_log, step=global_step + 1)
-                    if config.training.get("use_ema", False):
-                        # Switch back to the original model parameters for training.
-                        ema_model.restore(model.parameters())
-
-                # Eval for non-EMA.
-                eval_scores = eval_reconstruction(
-                    model,
-                    eval_dataloader,
-                    accelerator,
-                    evaluator,
-                )
-
-                logger.info(f"Non-EMA EVALUATION Step: {global_step + 1} ")
-                logger.info(pprint.pformat(eval_scores))
-                if accelerator.is_main_process:
-                    eval_log = {"eval/" + k: v for k, v in eval_scores.items()}
-                    accelerator.log(eval_log, step=global_step + 1)
-
-                accelerator.wait_for_everyone()
-
-            global_step += 1
-            if global_step >= config.training.max_train_steps:
-                accelerator.print(
-                    f"Finishing training: Global step is >= Max train steps: {global_step} >= {config.training.max_train_steps}"
-                )
-                break
-
-    return global_step
-
-
 def generator_train_one_epoch(
     config,
     logger,
@@ -752,7 +464,7 @@ def generator_train_one_epoch(
                 memory_format=torch.contiguous_format,
                 non_blocking=True,
             )
-            # Encode texts on the flight.
+            # Encode captions on the flight.
             with torch.no_grad():
                 if tokenizer_encode_fn is not None:
                     input_tokens, conditions = tokenizer_encode_fn(captions, images)
@@ -858,37 +570,36 @@ def generator_train_one_epoch(
                 # Wait for everyone to save their checkpoint.
                 accelerator.wait_for_everyone()
 
-            # Generate images.
-            is_caption_model = getattr(config.model.vq_model, "name", None) is not None
+            # Generate captions.
             if (
-                (global_step + 1) % config.experiment.generate_every == 0
-                and accelerator.is_main_process
-                and not is_caption_model
-            ):
-                # Generate images with non-EMA model
-                generate_images(
+                global_step + 1
+            ) % config.experiment.generate_every == 0 and accelerator.is_main_process:
+                # Generate captions with non-EMA model
+                generate_captions(
                     model,
                     tokenizer,
                     accelerator,
                     global_step + 1,
                     config.experiment.output_dir,
                     logger=logger,
+                    eval_dataloader=eval_dataloader,
                     config=config,
                     model_type="Non-EMA",
                 )
 
-                # Generate images with EMA model
+                # Generate captions with EMA model
                 if config.training.get("use_ema", False):
                     ema_model.store(model.parameters())
                     ema_model.copy_to(model.parameters())
 
-                    generate_images(
+                    generate_captions(
                         model,
                         tokenizer,
                         accelerator,
                         global_step + 1,
                         config.experiment.output_dir,
                         logger=logger,
+                        eval_dataloader=eval_dataloader,
                         config=config,
                         model_type="EMA",
                     )
@@ -906,219 +617,82 @@ def generator_train_one_epoch(
 
 
 @torch.no_grad()
-@torch._dynamo.disable
-def eval_reconstruction(
-    model,
-    eval_loader,
-    accelerator,
-    evaluator,
-):
-    model.eval()
-    evaluator.reset_metrics()
-    local_model = accelerator.unwrap_model(model)
-
-    # Determine dtype for evaluation based on mixed precision setting
-    if accelerator.mixed_precision == "fp16":
-        dtype = torch.float16
-    elif accelerator.mixed_precision == "bf16":
-        dtype = torch.bfloat16
-    else:
-        dtype = torch.float32
-
-    # Disable torch.compile during evaluation to avoid distributed tracing warnings
-    for batch in eval_loader:
-        images = batch["image"].to(
-            accelerator.device, memory_format=torch.contiguous_format, non_blocking=True
-        )
-        # translate conditions to text
-        original_images = torch.clone(images)
-
-        # Use autocast for FlashAttention compatibility
-        with torch.autocast(
-            device_type="cuda", dtype=dtype, enabled=accelerator.mixed_precision != "no"
-        ):
-            reconstructed_images, model_dict = local_model(images)
-
-        # shift both to [0, 1] for final evaluation
-        original_images = (original_images + 1.0) / 2.0
-        reconstructed_images = (reconstructed_images + 1.0) / 2.0
-        reconstructed_images = torch.clamp(reconstructed_images, 0.0, 1.0)
-        # Quantize to uint8
-        reconstructed_images = torch.round(reconstructed_images * 255.0) / 255.0
-        original_images = torch.clamp(original_images, 0.0, 1.0)
-
-        if isinstance(model_dict, dict) and "min_encoding_indices" in model_dict:
-            # For VQ model.
-            evaluator.update(
-                original_images,
-                reconstructed_images.squeeze(2),
-                model_dict["min_encoding_indices"],
-            )
-        else:
-            # For VAE model.
-            evaluator.update(original_images, reconstructed_images.squeeze(2), None)
-
-    model.train()
-    return evaluator.result()
-
-
-@torch.no_grad()
-@torch._dynamo.disable
-def reconstruct_images(
-    model,
-    original_images,
-    fnames,
-    accelerator,
-    global_step,
-    output_dir,
-    logger,
-    config=None,
-    text=None,
-):
-    logger.info("Reconstructing images...")
-    original_images = torch.clone(original_images)
-    model.eval()
-    dtype = torch.float32
-    if accelerator.mixed_precision == "fp16":
-        dtype = torch.float16
-    elif accelerator.mixed_precision == "bf16":
-        dtype = torch.bfloat16
-
-    # Use autocast for FlashAttention compatibility
-    with torch.autocast(
-        "cuda", dtype=dtype, enabled=accelerator.mixed_precision != "no"
-    ):
-        enc_tokens, encoder_dict = accelerator.unwrap_model(model).encode(
-            original_images
-        )
-        reconstructed_images = accelerator.unwrap_model(model).decode(enc_tokens)[0]
-
-    # shift both to [0, 1]
-    original_images = (original_images + 1.0) / 2.0
-    reconstructed_images = (reconstructed_images + 1.0) / 2.0
-
-    images_for_saving, images_for_logging = make_viz_from_samples(
-        original_images, reconstructed_images
-    )
-
-    # Log images.
-    if config.training.enable_wandb:
-        accelerator.get_tracker("wandb").log_images(
-            {"Train Reconstruction": images_for_saving}, step=global_step
-        )
-    else:
-        accelerator.get_tracker("tensorboard").log_images(
-            {"Train Reconstruction": images_for_logging}, step=global_step
-        )
-    # Log locally.
-    root = Path(output_dir) / "train_images"
-    os.makedirs(root, exist_ok=True)
-    for i, img in enumerate(images_for_saving):
-        filename = f"{global_step:08}_s-{i:03}-{fnames[i]}.png"
-        path = os.path.join(root, filename)
-        img.save(path)
-
-    model.train()
-
-
-@torch.no_grad()
-def generate_images(
+def generate_captions(
     model,
     tokenizer,
     accelerator,
     global_step,
     output_dir,
     logger,
+    eval_dataloader,
     config=None,
     model_type="",
 ):
     model_suffix = f" ({model_type})" if model_type else ""
-    file_suffix = f"-{model_type.lower()}" if model_type else ""
-    logger.info(f"Generating images{model_suffix}...")
+    logger.info(f"Generating captions{model_suffix}...")
 
     # Generate with random order sampling
-    logger.info(f"Generating images with random order sampling{model_suffix}...")
-    generated_image_random = sample_images(
+    logger.info(f"Generating captions with random order sampling{model_suffix}...")
+    generated_caption_random = sample_captions(
         model,
         tokenizer,
-        num_samples=config.training.num_generated_images,
+        eval_dataloader,
+        num_samples=config.training.num_generated_captions,
         config=config,
         accelerator=accelerator,
         sample_with_random_order=True,
     )
-    images_for_saving_random, images_for_logging_random = (
-        make_viz_from_samples_generation(generated_image_random)
-    )
 
-    # Log images.
+    # Log captions.
     if config.training.enable_wandb:
-        accelerator.get_tracker("wandb").log_images(
+        accelerator.get_tracker("wandb").log(
             {
                 f"Train Generated (Random Order){model_suffix}": [
-                    images_for_saving_random
+                    wandb.Image(item["image"], caption=item["caption"])
+                    for item in generated_caption_random
                 ]
             },
             step=global_step,
         )
     else:
-        accelerator.get_tracker("tensorboard").log_images(
-            {
-                f"Train Generated (Random Order){model_suffix}": images_for_logging_random
-            },
-            step=global_step,
-        )
-    # Log locally.
-    root = Path(output_dir) / ("train_generated_images")
-    os.makedirs(root, exist_ok=True)
-    filename = f"{global_step:08}_s-generated-random{file_suffix}.png"
-    path = os.path.join(root, filename)
-    images_for_saving_random.save(path)
+        raise NotImplementedError("TensorBoard does not support image-caption logging")
 
     # Generate with raster order sampling
-    logger.info(f"Generating images with raster order sampling{model_suffix}...")
-    generated_image_raster = sample_images(
+    logger.info(f"Generating captions with raster order sampling{model_suffix}...")
+    generated_caption_raster = sample_captions(
         model,
         tokenizer,
-        num_samples=config.training.num_generated_images,
+        eval_dataloader,
+        num_samples=config.training.num_generated_captions,
         config=config,
         accelerator=accelerator,
         sample_with_random_order=False,
     )
-    images_for_saving_raster, images_for_logging_raster = (
-        make_viz_from_samples_generation(generated_image_raster)
-    )
 
-    # Log images.
+    # Log captions.
     if config.training.enable_wandb:
-        accelerator.get_tracker("wandb").log_images(
+        accelerator.get_tracker("wandb").log(
             {
                 f"Train Generated (Raster Order){model_suffix}": [
-                    images_for_saving_raster
+                    wandb.Image(item["image"], caption=item["caption"])
+                    for item in generated_caption_raster
                 ]
             },
             step=global_step,
         )
     else:
-        accelerator.get_tracker("tensorboard").log_images(
-            {
-                f"Train Generated (Raster Order){model_suffix}": images_for_logging_raster
-            },
-            step=global_step,
-        )
-    # Log locally.
-    filename = f"{global_step:08}_s-generated-raster{file_suffix}.png"
-    path = os.path.join(root, filename)
-    images_for_saving_raster.save(path)
+        raise NotImplementedError("TensorBoard does not support image-caption logging")
+
     return
 
 
 @torch.no_grad()
 @torch._dynamo.disable
-def sample_images(
+def sample_captions(
     generator,
     tokenizer,
+    eval_dataloader,
     num_samples: int = 10,
-    labels=None,
     config=None,
     accelerator=None,
     device=None,
@@ -1150,23 +724,52 @@ def sample_images(
         dtype = torch.float32
         use_autocast = False
 
-    # Use autocast for FlashAttention compatibility
-    with torch.autocast("cuda", dtype=dtype, enabled=use_autocast):
-        generated_tokens = unwrap_generator.generate(
-            condition=labels,
-            guidance_scale=config.model.generator.guidance_scale,
-            randomize_temperature=config.model.generator.mbm_head.randomize_temperature,
-            tokens_allocation=config.model.generator.mbm_head.get(
-                "tokens_allocation", None
-            ),
-            sample_with_random_order=sample_with_random_order,
-            kv_cache=True,
+    generated_captions = []
+
+    for batch in eval_dataloader:
+        if len(generated_captions) >= num_samples:
+            break
+        captions = batch["caption"]
+        images = batch["image"].to(
+            accelerator.device,
+            memory_format=torch.contiguous_format,
+            non_blocking=True,
         )
-        generated_image = tokenizer.decode_tokens(generated_tokens)
-    # shift from [-1, 1] to [0, 1]
-    generated_image = (generated_image + 1.0) / 2.0
+        image_ids = batch["__key__"]
+        # Encode captions on the flight.
+        with torch.no_grad():
+            _, conditions = tokenizer.encode(captions, images)
+
+        condition = unwrap_generator.preprocess_condition(
+            conditions, cond_drop_prob=config.model.generator.class_label_dropout
+        )
+
+        # Use autocast for FlashAttention compatibility
+        with torch.autocast("cuda", dtype=dtype, enabled=use_autocast):
+            generated_tokens = unwrap_generator.generate(
+                condition=condition,
+                guidance_scale=config.model.generator.guidance_scale,
+                randomize_temperature=config.model.generator.mbm_head.randomize_temperature,
+                tokens_allocation=config.model.generator.mbm_head.get(
+                    "tokens_allocation", None
+                ),
+                sample_with_random_order=sample_with_random_order,
+                kv_cache=True,
+            )
+            generated_caption = tokenizer.decode_tokens(generated_tokens)
+            generated_captions.extend(
+                {
+                    "image_id": int(image_id),
+                    "caption": cap,
+                    "image": TVF.to_pil_image(
+                        ((img.cpu().float() + 1) / 2).clamp(0, 1)
+                    ),
+                }
+                for image_id, cap, img in zip(image_ids, generated_caption, images)
+            )
+
     generator.train()
-    return generated_image
+    return generated_captions
 
 
 def save_checkpoint(

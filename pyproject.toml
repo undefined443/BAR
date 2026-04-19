@@ -30,6 +30,7 @@ dependencies = [
     "torchvision",
     "flash-attn",
     "tensorboard>=2.20.0",
+    "pycocoevalcap>=1.2",
 ]
 
 [tool.uv.sources]

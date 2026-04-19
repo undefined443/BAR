@@ -107,8 +107,6 @@ def main():
 
     train_dataloader, eval_dataloader = create_dataloader(config, logger, accelerator)
 
-    eval_dataloader = None
-
     # Prepare everything with accelerator.
     logger.info("Preparing model, optimizer and dataloaders")
     # WebDataset-based dataloaders are already aware of distributed training, so we don't need to prepare them.

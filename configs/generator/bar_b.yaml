@@ -67,7 +67,7 @@ lr_scheduler:
 
 training:
   compile_model: true
-  num_generated_images: 10
+  num_generated_captions: 10
   gradient_accumulation_steps: 1
   per_gpu_batch_size: 128
   mixed_precision: bf16
