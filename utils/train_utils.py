@@ -21,6 +21,7 @@ from evaluator import VQGANEvaluator
 import torchvision.transforms.functional as TVF
 
 from modeling.tokenizer import BAR_FSQ
+from utils.eval_utils import load_refs_from_wds, compute_metrics
 
 
 def get_config():
@@ -643,13 +644,27 @@ def generate_captions(
         sample_with_random_order=True,
     )
 
+    if len(generated_caption_random) == 5000:
+        preds = {
+            item["image_id"]: [item["caption"]] for item in generated_caption_random
+        }
+        refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
+        metrics = compute_metrics(preds, refs)
+        logger.info(
+            "Metrics: " + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
+        )
+        if config.training.enable_wandb:
+            accelerator.get_tracker("wandb").log(
+                {f"eval/random/{k}": v for k, v in metrics.items()}, step=global_step
+            )
+
     # Log captions.
     if config.training.enable_wandb:
         accelerator.get_tracker("wandb").log(
             {
                 f"Train Generated (Random Order){model_suffix}": [
                     wandb.Image(item["image"], caption=item["caption"])
-                    for item in generated_caption_random
+                    for item in generated_caption_random[:16]
                 ]
             },
             step=global_step,
@@ -669,13 +684,27 @@ def generate_captions(
         sample_with_random_order=False,
     )
 
+    if len(generated_caption_raster) == 5000:
+        preds = {
+            item["image_id"]: [item["caption"]] for item in generated_caption_raster
+        }
+        refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
+        metrics = compute_metrics(preds, refs)
+        logger.info(
+            "Metrics: " + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
+        )
+        if config.training.enable_wandb:
+            accelerator.get_tracker("wandb").log(
+                {f"eval/raster/{k}": v for k, v in metrics.items()}, step=global_step
+            )
+
     # Log captions.
     if config.training.enable_wandb:
         accelerator.get_tracker("wandb").log(
             {
                 f"Train Generated (Raster Order){model_suffix}": [
                     wandb.Image(item["image"], caption=item["caption"])
-                    for item in generated_caption_raster
+                    for item in generated_caption_raster[:16]
                 ]
             },
             step=global_step,
