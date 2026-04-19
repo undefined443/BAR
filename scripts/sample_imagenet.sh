@@ -4,7 +4,7 @@
 # Usage: ./scripts/sample_imagenet.sh
 
 source .env
-torchrun \
+uv run torchrun \
     --nproc_per_node=8 \
     scripts/sample_imagenet.py \
     config=configs/generator/bar_b_patch4.yaml \
