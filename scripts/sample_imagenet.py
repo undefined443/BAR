@@ -68,7 +68,7 @@ def main():
     if not sample_speed_benchmark:
         if rank == 0:
             os.makedirs(sample_folder_dir, exist_ok=True)
-            print(f"Saving .png samples at {sample_folder_dir}")
+            print(f"Saving .txt samples at {sample_folder_dir}")
     else:
         if rank == 0:
             print("Speed benchmark mode: skipping image saving and npz creation")
@@ -92,7 +92,6 @@ def main():
     )
 
     _, eval_dataloader = create_dataloader(config, logger, accelerator)
-    total = 0
 
     # Benchmark variables
     warmup_batches = 10 if sample_speed_benchmark else 0
@@ -138,17 +137,14 @@ def main():
         )
 
         if not sample_speed_benchmark:
-            for i, sample in enumerate(generated_captions):
-                index = i * dist.get_world_size() + rank + total
-                filename = f"{index:06d}.txt"
+            for image_id, sample in zip(image_ids, generated_captions):
+                filename = f"{image_id:06d}.txt"
                 with open(f"{sample_folder_dir}/{filename}", "w") as f:
                     f.write(sample)
 
         # Count captions after warmup for benchmark
         if sample_speed_benchmark and batch_idx >= warmup_batches:
             benchmark_captions += global_batch_size
-
-        total += global_batch_size
 
     all_preds_list = [None] * world_size
     dist.all_gather_object(all_preds_list, preds)
