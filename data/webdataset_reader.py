@@ -24,15 +24,13 @@ def normalize_caption(caption):
     before the batch is assembled.
     """
     if isinstance(caption, list):
-        return random.choice(caption)
-    if isinstance(caption, dict):
+        caption = random.choice(caption)
+    elif isinstance(caption, dict):
         candidates = caption.get("captions", caption.get("caption"))
         if candidates is None:
             candidates = list(caption.values())
-        if isinstance(candidates, list):
-            return random.choice(candidates)
-        return str(candidates)
-    return caption
+        caption = random.choice(candidates) if isinstance(candidates, list) else str(candidates)
+    return caption.strip()
 
 
 def filter_keys(key_set):
