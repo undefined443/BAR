@@ -8,7 +8,7 @@ uv run accelerate launch \
     --num_machines=1 \
     --num_processes=8 \
     scripts/train_bar.py \
-    config=configs/generator/bar_b_patch4.yaml \
+    config=configs/generator/bar_b.yaml \
     dataset.params.train_shards_path_or_url="$TRAIN_SHARDS_DIR/train-{00000..00113}.tar" \
     dataset.params.eval_shards_path_or_url="$EVAL_SHARDS_DIR/test-{00000..00004}.tar" \
     training.num_generated_captions=5000 \

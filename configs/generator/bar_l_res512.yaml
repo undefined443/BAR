@@ -11,7 +11,8 @@ experiment:
 
 model:
   vq_model:
-    name: google/siglip2-so400m-patch16-512
+    tokenizer: openai/clip-vit-large-patch14
+    encoder: google/siglip2-so400m-patch16-512
     codebook_size: 1024
     token_size: 16
     vit_dec_patch_size: 16
