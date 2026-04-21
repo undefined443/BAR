@@ -845,6 +845,18 @@ def save_checkpoint(
         temp_path.rename(final_path)
         logger.info(f"Saved checkpoint to {final_path} (global_step={global_step})")
 
+        if wandb_run_id is not None and wandb.run is not None:
+            artifact = wandb.Artifact(
+                name=f"checkpoint-{wandb.run.id}",
+                type="model",
+                metadata={"global_step": global_step},
+            )
+            artifact.add_dir(str(final_path))
+            wandb.run.log_artifact(artifact)
+            logger.info(
+                f"Uploaded checkpoint to wandb artifact (global_step={global_step})"
+            )
+
     # Wait for rename to complete
     accelerator.wait_for_everyone()
 

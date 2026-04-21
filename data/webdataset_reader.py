@@ -29,7 +29,11 @@ def normalize_caption(caption):
         candidates = caption.get("captions", caption.get("caption"))
         if candidates is None:
             candidates = list(caption.values())
-        caption = random.choice(candidates) if isinstance(candidates, list) else str(candidates)
+        caption = (
+            random.choice(candidates)
+            if isinstance(candidates, list)
+            else str(candidates)
+        )
     return caption.strip()
 
 
