@@ -543,14 +543,14 @@ def generator_train_one_epoch(
                     f"Loss: {loss_average_meter.avg:0.4f} "
                 )
                 logs = {
-                    "lr": lr,
-                    "samples/sec/gpu": samples_per_second_per_gpu,
+                    "train/lr": lr,
+                    "time/samples_per_sec_per_gpu": samples_per_second_per_gpu,
                     "time/data_time": data_time_meter.val,
                     "time/batch_time": batch_time_meter.val,
                     "train/avg_mlm_loss": loss_average_meter.avg,
                 }
                 logs.update(gen_logs)
-                logs.update({"random_ratio": unwrap_model.random_ratio})
+                logs.update({"train/random_ratio": unwrap_model.random_ratio})
                 accelerator.log(logs, step=global_step + 1)
 
                 # Reset batch / data time meters per log window.
