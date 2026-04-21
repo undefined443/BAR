@@ -40,8 +40,13 @@ def init_wandb_run(config):
     )
 
 
-def log_metrics_to_wandb(run, metrics, order):
-    run.log({f"eval/{order}/{k}": v for k, v in metrics.items()})
+def log_metrics_to_wandb(run, metrics_by_order):
+    combined = {
+        f"eval/{k}/{order}": v
+        for order, metrics in metrics_by_order.items()
+        for k, v in metrics.items()
+    }
+    run.log(combined)
 
 
 def main():
@@ -191,7 +196,7 @@ def main():
         merged_random = {k: v for d in all_random_list for k, v in d.items()}
         refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
 
-        run = init_wandb_run(config) if config.training.enable_wandb else None
+        metrics_by_order = {}
         for order, merged_preds in [
             ("Raster Order", merged_raster),
             ("Random Order", merged_random),
@@ -201,9 +206,11 @@ def main():
                 f"Metrics ({order}): "
                 + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
             )
-            if run is not None:
-                log_metrics_to_wandb(run, metrics, order=order)
-        if run is not None:
+            metrics_by_order[order] = metrics
+
+        if config.training.enable_wandb:
+            run = init_wandb_run(config)
+            log_metrics_to_wandb(run, metrics_by_order)
             run.finish()
 
     # Make sure all processes have finished saving their samples before creating npz
