@@ -26,7 +26,7 @@ def get_config_cli():
     return conf
 
 
-def log_metrics_to_wandb(config, metrics):
+def log_metrics_to_wandb(config, metrics, order):
     metadata_path = (
         Path(config.experiment.generator_checkpoint).parent.parent / "metadata.json"
     )
@@ -39,7 +39,7 @@ def log_metrics_to_wandb(config, metrics):
         resume="allow",
         config=OmegaConf.to_container(config, resolve=True),
     )
-    run.log({f"eval/{k}": v for k, v in metrics.items()})
+    run.log({f"eval/{order}/{k}": v for k, v in metrics.items()})
     run.finish()
 
 
@@ -116,7 +116,8 @@ def main():
     warmup_batches = 10 if sample_speed_benchmark else 0
     start_time = None
     benchmark_captions = 0
-    preds = {}
+    preds_raster = {}
+    preds_random = {}
 
     for batch_idx, batch in enumerate(eval_dataloader):
         # Start timing after warmup batches
@@ -124,7 +125,6 @@ def main():
             torch.cuda.synchronize()
             start_time = time.time()
 
-        # Generate tokens
         tokens_allocation = config.model.generator.mbm_head.get(
             "tokens_allocation", None
         )
@@ -141,7 +141,7 @@ def main():
             input_tokens, conditions = tokenizer_encode_fn(captions, images)
             input_tokens = input_tokens.reshape(len(captions), -1)
 
-        generated_tokens = generator.generate(
+        generate_kwargs = dict(
             condition=conditions,
             guidance_scale=config.model.generator.guidance_scale,
             randomize_temperature=config.model.generator.mbm_head.randomize_temperature,
@@ -149,36 +149,58 @@ def main():
             tokens_allocation=tokens_allocation,
         )
 
-        generated_captions = tokenizer.decode_tokens(generated_tokens)
+        raster_captions = tokenizer.decode_tokens(
+            generator.generate(**generate_kwargs, sample_with_random_order=False)
+        )
+        random_captions = tokenizer.decode_tokens(
+            generator.generate(**generate_kwargs, sample_with_random_order=True)
+        )
 
-        preds.update(
-            {image_id: [cap] for image_id, cap in zip(image_ids, generated_captions)}
+        preds_raster.update(
+            {image_id: [cap] for image_id, cap in zip(image_ids, raster_captions)}
+        )
+        preds_random.update(
+            {image_id: [cap] for image_id, cap in zip(image_ids, random_captions)}
         )
 
         if not sample_speed_benchmark:
-            for image_id, sample in zip(image_ids, generated_captions):
+            raster_dir = os.path.join(sample_folder_dir, "raster")
+            random_dir = os.path.join(sample_folder_dir, "random")
+            os.makedirs(raster_dir, exist_ok=True)
+            os.makedirs(random_dir, exist_ok=True)
+            for image_id, raster_cap, random_cap in zip(
+                image_ids, raster_captions, random_captions
+            ):
                 filename = f"{image_id:06d}.txt"
-                with open(f"{sample_folder_dir}/{filename}", "w") as f:
-                    f.write(sample)
+                with open(f"{raster_dir}/{filename}", "w") as f:
+                    f.write(raster_cap)
+                with open(f"{random_dir}/{filename}", "w") as f:
+                    f.write(random_cap)
 
         # Count captions after warmup for benchmark
         if sample_speed_benchmark and batch_idx >= warmup_batches:
             benchmark_captions += global_batch_size
 
-    all_preds_list = [None] * world_size
-    dist.all_gather_object(all_preds_list, preds)
+    all_raster_list = [None] * world_size
+    all_random_list = [None] * world_size
+    dist.all_gather_object(all_raster_list, preds_raster)
+    dist.all_gather_object(all_random_list, preds_random)
     if rank == 0:
-        merged_preds = {}
-        for d in all_preds_list:
-            merged_preds.update(d)
+        merged_raster = {k: v for d in all_raster_list for k, v in d.items()}
+        merged_random = {k: v for d in all_random_list for k, v in d.items()}
         refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
-        metrics = compute_metrics(merged_preds, refs)
-        logger.info(
-            "Metrics: " + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
-        )
 
-        if config.training.enable_wandb:
-            log_metrics_to_wandb(config, metrics)
+        for order, merged_preds in [
+            ("Raster Order", merged_raster),
+            ("Random Order", merged_random),
+        ]:
+            metrics = compute_metrics(merged_preds, refs)
+            logger.info(
+                f"Metrics ({order}): "
+                + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
+            )
+            if config.training.enable_wandb:
+                log_metrics_to_wandb(config, metrics, order=order)
 
     # Make sure all processes have finished saving their samples before creating npz
     dist.barrier()
