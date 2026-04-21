@@ -183,7 +183,9 @@ def main():
             init_kwargs["wandb"]["resume"] = "allow"
 
         accelerator.init_trackers(
-            project_name=config.experiment.project, init_kwargs=init_kwargs
+            project_name=config.experiment.project,
+            init_kwargs=init_kwargs,
+            config=OmegaConf.to_container(config, resolve=True),
         )
 
         # Get the wandb run ID for saving in checkpoints
