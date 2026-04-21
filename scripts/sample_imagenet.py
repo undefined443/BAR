@@ -9,6 +9,8 @@ import torch
 import torch.distributed as dist
 import os
 import time
+import wandb
+import json
 from utils.logger import setup_logger
 from utils.train_utils import create_dataloader, get_pretrained_tokenizer
 from utils.eval_utils import load_refs_from_wds, compute_metrics
@@ -22,6 +24,23 @@ def get_config_cli():
     conf = OmegaConf.merge(yaml_conf, cli_conf)
 
     return conf
+
+
+def log_metrics_to_wandb(config, metrics):
+    metadata_path = (
+        Path(config.experiment.generator_checkpoint).parent.parent / "metadata.json"
+    )
+    wandb_run_id = json.loads(metadata_path.read_text()).get("wandb_run_id")
+
+    run = wandb.init(
+        project=config.experiment.project,
+        name=config.experiment.name,
+        id=wandb_run_id,
+        resume="allow",
+        config=OmegaConf.to_container(config, resolve=True),
+    )
+    run.log({f"eval/{k}": v for k, v in metrics.items()})
+    run.finish()
 
 
 def main():
@@ -157,6 +176,9 @@ def main():
         logger.info(
             "Metrics: " + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
         )
+
+        if config.training.enable_wandb:
+            log_metrics_to_wandb(config, metrics)
 
     # Make sure all processes have finished saving their samples before creating npz
     dist.barrier()
