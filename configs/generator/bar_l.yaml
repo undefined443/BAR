@@ -3,8 +3,7 @@ experiment:
   name: bar_l
   output_dir: bar_l
   max_train_examples: 1281167
-  save_every: 50000
-  eval_every: 5000000
+  save_every: 5000
   generate_every: 5000
   log_every: 50
   log_grad_norm_every: 1000
