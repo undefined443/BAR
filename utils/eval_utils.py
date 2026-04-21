@@ -1,6 +1,5 @@
 import webdataset as wds
 from pycocoevalcap.bleu.bleu import Bleu
-from pycocoevalcap.meteor.meteor import Meteor
 from pycocoevalcap.cider.cider import Cider
 
 
@@ -30,10 +29,6 @@ def compute_metrics(preds, refs):
     scorer = Bleu(4)
     score, _ = scorer.compute_score(refs, preds)
     metrics["BLEU-4"] = score[3]
-
-    scorer = Meteor()
-    score, _ = scorer.compute_score(refs, preds)
-    metrics["METEOR"] = score
 
     scorer = Cider()
     score, _ = scorer.compute_score(refs, preds)
