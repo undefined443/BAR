@@ -26,21 +26,22 @@ def get_config_cli():
     return conf
 
 
-def log_metrics_to_wandb(config, metrics, order):
+def init_wandb_run(config):
     metadata_path = (
         Path(config.experiment.generator_checkpoint).parent.parent / "metadata.json"
     )
     wandb_run_id = json.loads(metadata_path.read_text()).get("wandb_run_id")
-
-    run = wandb.init(
+    return wandb.init(
         project=config.experiment.project,
         name=config.experiment.name,
         id=wandb_run_id,
         resume="allow",
         config=OmegaConf.to_container(config, resolve=True),
     )
+
+
+def log_metrics_to_wandb(run, metrics, order):
     run.log({f"eval/{order}/{k}": v for k, v in metrics.items()})
-    run.finish()
 
 
 def main():
@@ -190,6 +191,7 @@ def main():
         merged_random = {k: v for d in all_random_list for k, v in d.items()}
         refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
 
+        run = init_wandb_run(config) if config.training.enable_wandb else None
         for order, merged_preds in [
             ("Raster Order", merged_raster),
             ("Random Order", merged_random),
@@ -199,8 +201,10 @@ def main():
                 f"Metrics ({order}): "
                 + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
             )
-            if config.training.enable_wandb:
-                log_metrics_to_wandb(config, metrics, order=order)
+            if run is not None:
+                log_metrics_to_wandb(run, metrics, order=order)
+        if run is not None:
+            run.finish()
 
     # Make sure all processes have finished saving their samples before creating npz
     dist.barrier()
