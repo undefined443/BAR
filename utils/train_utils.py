@@ -645,7 +645,7 @@ def _evaluate_and_log_captions(
             {
                 wandb_image_label: [
                     wandb.Image(item["image"], caption=item["caption"])
-                    for item in captions[:16]
+                    for item in captions[:15]
                 ]
             },
             step=global_step,
