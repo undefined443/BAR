@@ -6,7 +6,7 @@
 source .env
 uv run torchrun \
     --standalone \
-    --nproc_per_node=8 \
+    --nproc-per-node=gpu \
     scripts/sample_imagenet.py \
     config=configs/generator/bar_b.yaml \
     dataset.params.eval_shards_path_or_url="$EVAL_SHARDS_DIR/test-{00000..00004}.tar" \
