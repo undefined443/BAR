@@ -31,23 +31,26 @@ def init_wandb_run(config):
     metadata_path = (
         Path(config.experiment.generator_checkpoint).parent.parent / "metadata.json"
     )
-    wandb_run_id = json.loads(metadata_path.read_text()).get("wandb_run_id")
-    return wandb.init(
+    metadata = json.loads(metadata_path.read_text())
+    wandb_run_id = metadata.get("wandb_run_id")
+    global_step = metadata.get("global_step")
+    run = wandb.init(
         project=config.experiment.project,
         name=config.experiment.name,
         id=wandb_run_id,
         resume="allow",
         config=OmegaConf.to_container(config, resolve=True),
     )
+    return run, global_step
 
 
-def log_metrics_to_wandb(run, metrics_by_order):
+def log_metrics_to_wandb(run, metrics_by_order, global_step):
     combined = {
         f"eval/{k}/{order}": v
         for order, metrics in metrics_by_order.items()
         for k, v in metrics.items()
     }
-    run.log(combined)
+    run.log(combined, step=global_step)
 
 
 def main():
@@ -217,8 +220,8 @@ def main():
             metrics_by_order[order] = metrics
 
         if config.training.enable_wandb:
-            run = init_wandb_run(config)
-            log_metrics_to_wandb(run, metrics_by_order)
+            run, global_step = init_wandb_run(config)
+            log_metrics_to_wandb(run, metrics_by_order, global_step)
             run.finish()
 
     # Make sure all processes have finished saving their samples before creating npz
