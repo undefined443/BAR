@@ -21,6 +21,7 @@ from evaluator import VQGANEvaluator
 import torchvision.transforms.functional as TVF
 
 from modeling.tokenizer import BAR_FSQ
+from accelerate.utils import gather_object
 from utils.eval_utils import load_refs_from_wds, compute_metrics
 
 
@@ -572,9 +573,7 @@ def generator_train_one_epoch(
                 accelerator.wait_for_everyone()
 
             # Generate captions.
-            if (
-                global_step + 1
-            ) % config.experiment.generate_every == 0 and accelerator.is_main_process:
+            if (global_step + 1) % config.experiment.generate_every == 0:
                 # Generate captions with non-EMA model
                 generate_captions(
                     model,
@@ -617,6 +616,44 @@ def generator_train_one_epoch(
     return global_step
 
 
+def _evaluate_and_log_captions(
+    captions,
+    accelerator,
+    config,
+    logger,
+    global_step,
+    wandb_metric_prefix,
+    wandb_image_label,
+):
+    if config.training.num_generated_captions == 5000:
+        all_captions = gather_object(captions)
+        if accelerator.is_main_process:
+            preds = {item["image_id"]: [item["caption"]] for item in all_captions}
+            refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
+            metrics = compute_metrics(preds, refs)
+            logger.info(
+                "Metrics: " + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
+            )
+            if config.training.enable_wandb:
+                accelerator.get_tracker("wandb").log(
+                    {f"{wandb_metric_prefix}/{k}": v for k, v in metrics.items()},
+                    step=global_step,
+                )
+
+    if config.training.enable_wandb:
+        accelerator.get_tracker("wandb").log(
+            {
+                wandb_image_label: [
+                    wandb.Image(item["image"], caption=item["caption"])
+                    for item in captions[:16]
+                ]
+            },
+            step=global_step,
+        )
+    else:
+        raise NotImplementedError("TensorBoard does not support image-caption logging")
+
+
 @torch.no_grad()
 def generate_captions(
     model,
@@ -644,33 +681,15 @@ def generate_captions(
         sample_with_random_order=True,
     )
 
-    if len(generated_caption_random) == 5000:
-        preds = {
-            item["image_id"]: [item["caption"]] for item in generated_caption_random
-        }
-        refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
-        metrics = compute_metrics(preds, refs)
-        logger.info(
-            "Metrics: " + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
-        )
-        if config.training.enable_wandb:
-            accelerator.get_tracker("wandb").log(
-                {f"eval/random/{k}": v for k, v in metrics.items()}, step=global_step
-            )
-
-    # Log captions.
-    if config.training.enable_wandb:
-        accelerator.get_tracker("wandb").log(
-            {
-                f"Train Generated (Random Order){model_suffix}": [
-                    wandb.Image(item["image"], caption=item["caption"])
-                    for item in generated_caption_random[:16]
-                ]
-            },
-            step=global_step,
-        )
-    else:
-        raise NotImplementedError("TensorBoard does not support image-caption logging")
+    _evaluate_and_log_captions(
+        generated_caption_random,
+        accelerator,
+        config,
+        logger,
+        global_step,
+        wandb_metric_prefix="eval/random",
+        wandb_image_label=f"Train Generated (Random Order){model_suffix}",
+    )
 
     # Generate with raster order sampling
     logger.info(f"Generating captions with raster order sampling{model_suffix}...")
@@ -684,35 +703,15 @@ def generate_captions(
         sample_with_random_order=False,
     )
 
-    if len(generated_caption_raster) == 5000:
-        preds = {
-            item["image_id"]: [item["caption"]] for item in generated_caption_raster
-        }
-        refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
-        metrics = compute_metrics(preds, refs)
-        logger.info(
-            "Metrics: " + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
-        )
-        if config.training.enable_wandb:
-            accelerator.get_tracker("wandb").log(
-                {f"eval/raster/{k}": v for k, v in metrics.items()}, step=global_step
-            )
-
-    # Log captions.
-    if config.training.enable_wandb:
-        accelerator.get_tracker("wandb").log(
-            {
-                f"Train Generated (Raster Order){model_suffix}": [
-                    wandb.Image(item["image"], caption=item["caption"])
-                    for item in generated_caption_raster[:16]
-                ]
-            },
-            step=global_step,
-        )
-    else:
-        raise NotImplementedError("TensorBoard does not support image-caption logging")
-
-    return
+    _evaluate_and_log_captions(
+        generated_caption_raster,
+        accelerator,
+        config,
+        logger,
+        global_step,
+        wandb_metric_prefix="eval/raster",
+        wandb_image_label=f"Train Generated (Raster Order){model_suffix}",
+    )
 
 
 @torch.no_grad()
