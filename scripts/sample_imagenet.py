@@ -11,6 +11,7 @@ import os
 import time
 import wandb
 import json
+from tqdm import tqdm
 from utils.logger import setup_logger
 from utils.train_utils import create_dataloader, get_pretrained_tokenizer
 from utils.eval_utils import load_refs_from_wds, compute_metrics
@@ -124,7 +125,15 @@ def main():
     preds_raster = {}
     preds_random = {}
 
-    for batch_idx, batch in enumerate(eval_dataloader):
+    total_batches = 5000 // global_batch_size
+    progress = tqdm(
+        eval_dataloader,
+        total=total_batches,
+        desc="Sampling",
+        unit="batch",
+        disable=rank != 0,
+    )
+    for batch_idx, batch in enumerate(progress):
         # Start timing after warmup batches
         if sample_speed_benchmark and batch_idx == warmup_batches:
             torch.cuda.synchronize()
