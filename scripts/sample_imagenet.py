@@ -102,7 +102,6 @@ def main():
 
     n = per_proc_batch_size
     global_batch_size = n * dist.get_world_size()
-    output_dir = config.experiment.output_dir
     accelerator = SimpleNamespace(
         num_processes=world_size,
         process_index=rank,
@@ -112,7 +111,7 @@ def main():
     logger = setup_logger(
         name="SAMPLE",
         log_level="INFO",
-        output_file=f"{output_dir}/log{accelerator.process_index}.txt",
+        output_file=f"{sample_folder_dir}/log{accelerator.process_index}.txt",
         use_accelerate=False,
     )
 
