@@ -552,6 +552,7 @@ class BAR(BaseModel):
                 randomize_temperature=randomize_temperature,
                 tokens_allocation=tokens_allocation,
                 use_cfg=use_cfg,
+                **kwargs,
             )
             ids = torch.cat((ids, sampled), dim=-1)
 

@@ -9,8 +9,6 @@ import torch
 import torch.distributed as dist
 import os
 import time
-import wandb
-import json
 from tqdm import tqdm
 from utils.logger import setup_logger
 from utils.train_utils import create_dataloader, get_pretrained_tokenizer
@@ -25,32 +23,6 @@ def get_config_cli():
     conf = OmegaConf.merge(yaml_conf, cli_conf)
 
     return conf
-
-
-def init_wandb_run(config):
-    metadata_path = (
-        Path(config.experiment.generator_checkpoint).parent.parent / "metadata.json"
-    )
-    metadata = json.loads(metadata_path.read_text())
-    wandb_run_id = metadata.get("wandb_run_id")
-    global_step = metadata.get("global_step")
-    run = wandb.init(
-        project=config.experiment.project,
-        name=config.experiment.name,
-        id=wandb_run_id,
-        resume="allow",
-        config=OmegaConf.to_container(config, resolve=True),
-    )
-    return run, global_step
-
-
-def log_metrics_to_wandb(run, metrics_by_order, global_step):
-    combined = {
-        f"eval/{k}/{order}": v
-        for order, metrics in metrics_by_order.items()
-        for k, v in metrics.items()
-    }
-    run.log(combined, step=global_step)
 
 
 def main():
@@ -164,6 +136,7 @@ def main():
             randomize_temperature=config.model.generator.mbm_head.randomize_temperature,
             kv_cache=True,
             tokens_allocation=tokens_allocation,
+            num_steps=config.model.generator.mbm_head.get("num_steps", 50),
         )
 
         raster_captions = tokenizer.decode_tokens(
@@ -218,11 +191,6 @@ def main():
                 + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
             )
             metrics_by_order[order] = metrics
-
-        if config.training.enable_wandb:
-            run, global_step = init_wandb_run(config)
-            log_metrics_to_wandb(run, metrics_by_order, global_step)
-            run.finish()
 
     # Make sure all processes have finished saving their samples before creating npz
     dist.barrier()
