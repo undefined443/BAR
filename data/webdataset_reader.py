@@ -100,8 +100,8 @@ class ImageTransform:
                 transforms.Normalize(normalize_mean, normalize_std),
             ]
         )
-        print(f"self.train_transform: {self.train_transform}")
-        print(f"self.eval_transform: {self.eval_transform}")
+        # print(f"self.train_transform: {self.train_transform}")
+        # print(f"self.eval_transform: {self.eval_transform}")
 
 
 class SimpleImageDataset:
