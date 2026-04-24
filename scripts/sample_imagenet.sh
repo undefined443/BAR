@@ -12,7 +12,7 @@ uv run torchrun \
     dataset.params.eval_shards_path_or_url="$EVAL_SHARDS_DIR/test-{00000..00004}.tar" \
     dataset.params.num_workers_per_gpu=12 \
     experiment.output_dir=bar_b \
-    experiment.generator_checkpoint=bar_b/checkpoint-latest/unwrapped_model/pytorch_model.bin \
+    experiment.generator_checkpoint=bar_b/unwrapped_model/pytorch_model.bin \
     model.generator.guidance_scale=9.6 \
-    model.generator.mbm_head.randomize_temperature=1.4 \
-    "model.generator.mbm_head.tokens_allocation=[64,64,64,64]"
+    model.generator.mbm_head.num_steps=50 \
+    model.generator.mbm_head.use_ddim=true
