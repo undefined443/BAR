@@ -197,7 +197,7 @@ def main():
         config_path = Path(output_dir) / "config.yaml"
         logger.info(f"Saving config to {config_path}")
         OmegaConf.save(config, config_path)
-        logger.info(f"Config:\n{OmegaConf.to_yaml(config)}")
+        # logger.info(f"Config:\n{OmegaConf.to_yaml(config)}")
 
     for current_epoch in range(first_epoch, num_train_epochs):
         accelerator.print(f"Epoch {current_epoch}/{num_train_epochs - 1} started.")
