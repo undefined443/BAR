@@ -181,7 +181,10 @@ def main():
 
     wandb_run_id = config.experiment.get("wandb_run_id")
     global_step = config.experiment.get("global_step")
-    checkpoint_path = download_checkpoint(entity, project, wandb_run_id, global_step)
+    with accelerator.main_process_first():
+        checkpoint_path = download_checkpoint(
+            entity, project, wandb_run_id, global_step
+        )
 
     logger = setup_logger(name="BENCH", log_level="INFO", use_accelerate=False)
 
