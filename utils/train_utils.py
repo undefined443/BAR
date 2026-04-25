@@ -80,7 +80,7 @@ def create_model_and_loss_module(config, logger, accelerator):
     model_cls = BAR
     loss_cls = None  # but we will not use
     model = model_cls(config)
-    print(model)
+    # print(model)
 
     # Create the EMA model.
     ema_model = None
