@@ -32,12 +32,13 @@ dependencies = [
     "tensorboard>=2.20.0",
     "pycocoevalcap>=1.2",
     "python-dotenv>=1.2.2",
+    "wandb-workspaces>=0.3.9",
 ]
 
 [tool.uv.sources]
 torch = { index = "pytorch" }
 torchvision = { index = "pytorch" }
-flash-attn = { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.8.3%2Bcu130torch2.10-cp313-cp313-linux_x86_64.whl" }
+flash-attn = { url = "https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.8.3%2Bcu128torch2.10-cp313-cp313-linux_x86_64.whl" }
 
 [[tool.uv.index]]
 url = "https://mirrors.sustech.edu.cn/pypi/web/simple"
@@ -45,5 +46,5 @@ default = true
 
 [[tool.uv.index]]
 name = "pytorch"
-url = "https://download.pytorch.org/whl/cu130"
+url = "https://download.pytorch.org/whl/cu128"
 explicit = true
