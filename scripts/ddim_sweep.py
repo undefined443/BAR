@@ -2,18 +2,21 @@
 
 Launch with accelerate:
     uv run accelerate launch --num_machines=1 --num_processes=<N> \\
-        scripts/bench_diffusion_steps.py \\
+        scripts/ddim_sweep.py \\
         config=<config.yaml> \\
-        experiment.generator_checkpoint=<checkpoint.bin> \\
+        experiment.wandb_run_id=<wandb_run_id> \\
+        [experiment.global_step=<step>] \\
         [bench.steps=[1,5,10,20,50,100]] \\
         [bench.project=<wandb_project>] \\
         [bench.no_wandb=true]
+
+The checkpoint is downloaded from a wandb artifact. experiment.global_step
+selects a specific checkpoint.
 
 The model is loaded once. Each batch is encoded once, then generated for
 all num_steps values before moving to the next batch.
 """
 
-import json
 import os
 import sys
 from collections import defaultdict
@@ -21,6 +24,7 @@ from pathlib import Path
 
 import dotenv
 import torch
+import wandb
 import torch.distributed as dist
 from accelerate import Accelerator
 from accelerate.utils import set_seed
@@ -73,9 +77,45 @@ def print_summary(steps, all_metrics):
                 print(f"{num_steps:>6}  (missing)")
 
 
-def log_to_wandb(steps, all_metrics, training_run_id, project, entity, checkpoint_dir):
-    import wandb
+def _find_checkpoint_artifact(api, entity, project, wandb_run_id, global_step):
+    artifact_name = f"checkpoint-{wandb_run_id}"
+    full_name = f"{entity}/{project}/{artifact_name}"
+    try:
+        versions = api.artifacts("model", full_name)
+        for v in versions:
+            if v.metadata.get("global_step") == global_step:
+                return v
+    except wandb.errors.CommError:
+        pass
 
+    raise RuntimeError(
+        f"Checkpoint artifact not found for run {wandb_run_id}, step {global_step}"
+    )
+
+
+def download_checkpoint(entity, project, wandb_run_id, global_step):
+    """Download a checkpoint artifact from wandb, using wandb's local cache.
+
+    Returns (checkpoint_path, checkpoint_dir).
+    """
+    if not all([entity, project, wandb_run_id, global_step]):
+        raise ValueError(
+            "entity, project, wandb_run_id, and global_step must all be provided to download checkpoint"
+        )
+    api = wandb.Api()
+    artifact = _find_checkpoint_artifact(
+        api, entity, project, wandb_run_id, global_step
+    )
+
+    print(f"Downloading artifact {artifact.name} (cached in ~/.cache/wandb)")
+    checkpoint_dir = Path(artifact.download())
+    checkpoint_path = checkpoint_dir / "unwrapped_model" / "pytorch_model.bin"
+    return checkpoint_path
+
+
+def log_to_wandb(
+    steps, all_metrics, wandb_run_id, global_step, project, entity, experiment_name
+):
     orders = []
     for m in all_metrics.values():
         if m:
@@ -88,38 +128,45 @@ def log_to_wandb(steps, all_metrics, training_run_id, project, entity, checkpoin
     run = wandb.init(
         project=project,
         entity=entity,
-        name=f"bench_steps/{checkpoint_dir.name}",
+        name=f"ddim_sweep/{experiment_name}-{global_step}",
         config={
-            "training_run_id": training_run_id,
-            "checkpoint_dir": str(checkpoint_dir),
+            "training_run_id": wandb_run_id,
+            "global_step": global_step,
+            "experiment_name": experiment_name,
             "steps": steps,
         },
         job_type="bench_diffusion_steps",
     )
 
-    order_prefix = {
+    api = wandb.Api()
+    artifact = _find_checkpoint_artifact(
+        api, entity, project, wandb_run_id, global_step
+    )
+    run.use_artifact(artifact)
+
+    order_postfix = {
         order: ("raster" if "Raster" in order else "random") for order in orders
     }
     for num_steps in steps:
-        log_dict = {"num_steps": num_steps}
+        log_dict = {}
         for order, metrics in (all_metrics.get(num_steps) or {}).items():
-            prefix = order_prefix[order]
+            postfix = order_postfix[order]
             for k, v in metrics.items():
-                log_dict[f"{prefix}/{k}"] = v
-        wandb.log(log_dict)
+                log_dict[f"{k}/{postfix}"] = v
+        wandb.log(log_dict, step=num_steps)
 
     run.finish()
 
 
 def main():
-    dotenv.load_dotenv(".env")
+    dotenv.load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
     config = get_config_cli()
+    project = config.experiment.get("project", None)
+    enable_wandb = config.training.get("enable_wandb", False)
     bench_cfg = config.get("bench", {})
     steps = list(bench_cfg.get("steps", STEPS_DEFAULT))
-    project = bench_cfg.get("project", None) or os.environ.get("WANDB_PROJECT")
     entity = os.environ.get("WANDB_ENTITY")
-    no_wandb = bench_cfg.get("no_wandb", False)
 
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
@@ -132,13 +179,9 @@ def main():
     )
     set_seed(config.experiment.get("random_seed", 42), device_specific=True)
 
-    checkpoint_path = Path(config.experiment.generator_checkpoint)
-    checkpoint_dir = checkpoint_path.parent.parent
-    training_run_id = None
-    metadata_path = checkpoint_dir / "metadata.json"
-    if metadata_path.exists():
-        meta = json.loads(metadata_path.read_text())
-        training_run_id = meta.get("wandb_run_id")
+    wandb_run_id = config.experiment.get("wandb_run_id")
+    global_step = config.experiment.get("global_step")
+    checkpoint_path = download_checkpoint(entity, project, wandb_run_id, global_step)
 
     logger = setup_logger(name="BENCH", log_level="INFO", use_accelerate=False)
 
@@ -156,8 +199,9 @@ def main():
     if accelerator.is_main_process:
         total_params = sum(p.numel() for p in generator.parameters())
         print(f"Generator parameters: {total_params:,}")
-        print(f"Training run: {training_run_id or '(not found)'}")
-        print(f"Steps: {steps}")
+        print(f"Training run: {wandb_run_id}")
+        print(f"Global step: {global_step}")
+        print(f"Sweep steps: {steps}")
 
     per_proc_batch_size = config.experiment.get("per_proc_batch_size", 125)
     global_batch_size = per_proc_batch_size * accelerator.num_processes
@@ -246,16 +290,16 @@ def main():
                 step_metrics[order] = metrics
             all_metrics[num_steps] = step_metrics
 
-    if accelerator.is_main_process:
-        print("\n" + "=" * 60)
-        print("SUMMARY")
-        print("=" * 60)
-        print_summary(steps, all_metrics)
-
-        if not no_wandb:
-            log_to_wandb(
-                steps, all_metrics, training_run_id, project, entity, checkpoint_dir
-            )
+    if accelerator.is_main_process and enable_wandb:
+        log_to_wandb(
+            steps,
+            all_metrics,
+            wandb_run_id,
+            global_step,
+            project,
+            entity,
+            config.experiment.name,
+        )
 
 
 if __name__ == "__main__":

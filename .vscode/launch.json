@@ -25,6 +25,29 @@
       "envFile": "${workspaceFolder}/.env"
     },
     {
+      "name": "ddim_sweep",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/ddim_sweep.py",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "config=configs/generator/bar_b.yaml",
+        "dataset.params.eval_shards_path_or_url=${input:shards_path}",
+        "dataset.params.num_workers_per_gpu=1",
+        "experiment.wandb_run_id=${input:wandb_run_id}",
+        "experiment.global_step=${input:global_step}",
+      ],
+      "env": {
+        "RANK": "0",
+        "WORLD_SIZE": "1",
+        "LOCAL_RANK": "0",
+        "MASTER_ADDR": "localhost",
+        "MASTER_PORT": "0"
+      },
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
       "name": "sample_imagenet",
       "type": "debugpy",
       "request": "launch",
@@ -56,6 +79,16 @@
       "id": "shards_path",
       "type": "promptString",
       "description": "Dataset shards path)"
+    },
+    {
+      "id": "wandb_run_id",
+      "type": "promptString",
+      "description": "WandB run ID (e.g. x6zyq2o1)"
+    },
+    {
+      "id": "global_step",
+      "type": "promptString",
+      "description": "Global step (e.g. 1000)"
     }
   ]
 }
