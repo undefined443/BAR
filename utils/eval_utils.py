@@ -27,7 +27,7 @@ def compute_metrics(preds, refs):
     metrics = {}
 
     scorer = Bleu(4)
-    score, _ = scorer.compute_score(refs, preds)
+    score, _ = scorer.compute_score(refs, preds, verbose=0)
     metrics["BLEU-4"] = score[3]
 
     scorer = Cider()
