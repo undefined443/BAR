@@ -106,8 +106,6 @@ def download_checkpoint(entity, project, wandb_run_id, global_step):
     artifact = _find_checkpoint_artifact(
         api, entity, project, wandb_run_id, global_step
     )
-
-    print(f"Downloading artifact {artifact.name} (cached in ~/.cache/wandb)")
     checkpoint_dir = Path(artifact.download())
     checkpoint_path = checkpoint_dir / "unwrapped_model" / "pytorch_model.bin"
     return checkpoint_path
