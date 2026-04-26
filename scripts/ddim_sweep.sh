@@ -21,6 +21,7 @@ shift 3
 uv run accelerate launch \
     --num_machines=1 \
     --num_processes=8 \
+    --main_process_port 0 \
     scripts/ddim_sweep.py \
     config="$CONFIG" \
     dataset.params.eval_shards_path_or_url="$EVAL_SHARDS_DIR/test-{00000..00004}.tar" \
