@@ -25,6 +25,7 @@ from pathlib import Path
 import dotenv
 import torch
 import wandb
+import webdataset as wds
 import torch.distributed as dist
 from accelerate import Accelerator
 from accelerate.utils import set_seed
@@ -177,6 +178,14 @@ def main():
     )
     set_seed(config.experiment.get("random_seed", 42), device_specific=True)
 
+    eval_shards = list(
+        wds.shardlists.expand_urls(config.dataset.params.eval_shards_path_or_url)
+    )
+    assert len(eval_shards) % accelerator.num_processes == 0, (
+        f"Number of eval shards ({len(eval_shards)}) must be divisible by "
+        f"num_processes ({accelerator.num_processes})"
+    )
+
     wandb_run_id = config.experiment.get("wandb_run_id")
     global_step = config.experiment.get("global_step")
     with accelerator.main_process_first():
@@ -204,10 +213,6 @@ def main():
         print(f"Global step: {global_step}")
         print(f"Sweep steps: {steps}")
 
-    per_proc_batch_size = config.experiment.get("per_proc_batch_size", 125)
-    global_batch_size = per_proc_batch_size * accelerator.num_processes
-    total_batches = 5000 // global_batch_size
-
     _, eval_dataloader = create_dataloader(config, logger, accelerator)
 
     refs = (
@@ -229,15 +234,11 @@ def main():
 
     progress = tqdm(
         eval_dataloader,
-        total=total_batches,
         desc="Sampling",
         unit="batch",
         disable=not accelerator.is_main_process,
     )
-    for batch_idx, batch in enumerate(progress):
-        if batch_idx >= total_batches:
-            break
-
+    for batch in progress:
         captions = batch["caption"]
         images = batch["image"].to(
             accelerator.device,

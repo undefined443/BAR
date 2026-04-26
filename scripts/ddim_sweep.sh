@@ -20,7 +20,7 @@ shift 3
 
 uv run accelerate launch \
     --num_machines=1 \
-    --num_processes=8 \
+    --num_processes=1 \
     --main_process_port 0 \
     scripts/ddim_sweep.py \
     config="$CONFIG" \
