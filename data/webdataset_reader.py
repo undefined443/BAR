@@ -15,35 +15,6 @@ from torchvision import transforms, datasets
 import numpy as np
 
 
-def normalize_caption(caption):
-    """Normalize caption to a single string.
-
-    COCO and similar datasets store multiple captions per image (e.g. as a
-    JSON list or a dict with a 'captions' key).  ``default_collate`` cannot
-    stack variable-length Python lists, so we pick one caption randomly here,
-    before the batch is assembled.
-    """
-    if isinstance(caption, list):
-        caption = random.choice(caption)
-    elif isinstance(caption, dict):
-        candidates = caption.get("captions", caption.get("caption"))
-        if candidates is None:
-            candidates = list(caption.values())
-        caption = (
-            random.choice(candidates)
-            if isinstance(candidates, list)
-            else str(candidates)
-        )
-    return caption.strip()
-
-
-def filter_keys(key_set):
-    def _f(dictionary):
-        return {k: v for k, v in dictionary.items() if k in key_set}
-
-    return _f
-
-
 class ImageTransform:
     def __init__(
         self,
@@ -137,6 +108,27 @@ class SimpleImageDataset:
             normalize_mean: A list of float, the normalization mean used to normalize the image tensor.
             normalize_std: A list of float, the normalization std used to normalize the image tensor.
         """
+
+        def normalize_caption(caption):
+            if isinstance(caption, list):
+                caption = random.choice(caption)
+            elif isinstance(caption, dict):
+                candidates = caption.get("captions", caption.get("caption"))
+                if candidates is None:
+                    candidates = list(caption.values())
+                caption = (
+                    random.choice(candidates)
+                    if isinstance(candidates, list)
+                    else str(candidates)
+                )
+            return caption.strip()
+
+        def filter_keys(key_set):
+            def _f(dictionary):
+                return {k: v for k, v in dictionary.items() if k in key_set}
+
+            return _f
+
         transform = ImageTransform(
             resize_shorter_edge,
             crop_size,
