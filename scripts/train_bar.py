@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import math
 import os
+import subprocess
 
 from accelerate.utils import set_seed
 from accelerate import Accelerator
@@ -192,6 +193,18 @@ def main():
         if config.training.enable_wandb:
             wandb_tracker = accelerator.get_tracker("wandb")
             wandb_run_id = wandb_tracker.run.id
+            _project_root = str(Path(__file__).resolve().parent.parent)
+            _tracked = set(
+                subprocess.check_output(
+                    ["git", "ls-files"],
+                    cwd=_project_root,
+                    text=True,
+                ).splitlines()
+            )
+            wandb_tracker.run.log_code(
+                _project_root,
+                include_fn=lambda path, root: os.path.relpath(path, root) in _tracked,
+            )
             logger.info(f"Wandb run ID: {wandb_run_id}")
 
         config_path = Path(output_dir) / "config.yaml"
