@@ -168,7 +168,8 @@ class SimpleImageDataset:
                 caption="txt;json",
                 handler=wds.warn_and_continue,
             ),
-            wds.map(filter_keys(set(["image", "caption"]))),
+            wds.map(lambda sample: {**sample, "cocoid": sample["caption"]["cocoid"]}),
+            wds.map(filter_keys(set(["image", "caption", "cocoid"]))),
             wds.map_dict(
                 image=transform.eval_transform,
                 caption=normalize_caption,

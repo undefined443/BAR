@@ -763,7 +763,7 @@ def sample_captions(
             memory_format=torch.contiguous_format,
             non_blocking=True,
         )
-        image_ids = batch["__key__"]
+        image_ids = batch["cocoid"]
         # Encode captions on the flight.
         with torch.no_grad():
             _, conditions = tokenizer.encode(captions, images)

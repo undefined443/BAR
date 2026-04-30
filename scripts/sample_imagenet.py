@@ -124,7 +124,7 @@ def main():
             memory_format=torch.contiguous_format,
             non_blocking=True,
         )
-        image_ids = [int(k) for k in batch["__key__"]]
+        image_ids = [int(k) for k in batch["cocoid"]]
 
         with torch.no_grad():
             input_tokens, conditions = tokenizer_encode_fn(captions, images)

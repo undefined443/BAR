@@ -15,7 +15,7 @@ def load_refs_from_wds(eval_shards):
         eval_shards, shardshuffle=False, nodesplitter=None
     ).decode()
     for sample in dataset:
-        image_id = int(sample["__key__"])
+        image_id = int(sample["cocoid"])
         raw = sample["json"]
         candidates = raw["captions"]
         captions = [str(c).strip() for c in candidates]
