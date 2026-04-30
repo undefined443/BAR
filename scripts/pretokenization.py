@@ -7,20 +7,20 @@ sys.path.insert(0, str(PathLib(__file__).resolve().parent.parent))
 
 import argparse
 import datetime
-import numpy as np
-from PIL import Image
-
 import os
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
-import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-from utils.train_utils import get_pretrained_tokenizer
-import utils.misc as misc
+import torchvision.transforms as transforms
+from PIL import Image
 from tqdm import tqdm
+
+import utils.misc as misc
+from utils.train_utils import get_pretrained_tokenizer
 
 
 def center_crop_arr(pil_image, image_size):

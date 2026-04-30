@@ -10,23 +10,22 @@ import math
 import os
 import subprocess
 
-from accelerate.utils import set_seed
-from accelerate import Accelerator
-
 import torch
+from accelerate import Accelerator
+from accelerate.utils import set_seed
 from omegaconf import OmegaConf
-from utils.logger import setup_logger
 
+from utils.logger import setup_logger
 from utils.train_utils import (
-    get_config,
-    create_model_and_loss_module,
-    get_pretrained_tokenizer,
-    create_optimizer,
-    create_lr_scheduler,
-    create_dataloader,
     auto_resume,
-    save_checkpoint,
+    create_dataloader,
+    create_lr_scheduler,
+    create_model_and_loss_module,
+    create_optimizer,
     generator_train_one_epoch,
+    get_config,
+    get_pretrained_tokenizer,
+    save_checkpoint,
 )
 
 

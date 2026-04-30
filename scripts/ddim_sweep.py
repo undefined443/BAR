@@ -24,13 +24,14 @@ from pathlib import Path
 
 import dotenv
 import torch
-import wandb
-import webdataset as wds
 import torch.distributed as dist
+import webdataset as wds
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from omegaconf import OmegaConf
 from tqdm import tqdm
+
+import wandb
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -38,7 +39,6 @@ from modeling.generator import BAR
 from utils.eval_utils import compute_metrics, load_refs_from_wds
 from utils.logger import setup_logger
 from utils.train_utils import create_dataloader, get_pretrained_tokenizer
-
 
 STEPS_DEFAULT = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 30, 50, 75, 100, 150, 200]
 

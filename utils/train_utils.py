@@ -1,28 +1,27 @@
 """Training utils."""
 
 import json
+import math
 import os
 import time
-import math
 from pathlib import Path
-import wandb
 
-from data import SimpleImageDataset, CachedTokensFolder
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+import torchvision.transforms.functional as TVF
+from accelerate.utils import gather_object
 from omegaconf import OmegaConf
 from torch.optim import AdamW
-from utils.lr_schedulers import get_scheduler
-from modeling.modules import EMAModel
-from modeling.generator import BAR
+from torch.utils.data import DataLoader
+
+import wandb
+from data import CachedTokensFolder, SimpleImageDataset
 from evaluator import VQGANEvaluator
-
-import torchvision.transforms.functional as TVF
-
+from modeling.generator import BAR
+from modeling.modules import EMAModel
 from modeling.tokenizer import BAR_FSQ
-from accelerate.utils import gather_object
-from utils.eval_utils import load_refs_from_wds, compute_metrics
+from utils.eval_utils import compute_metrics, load_refs_from_wds
+from utils.lr_schedulers import get_scheduler
 
 
 def get_config():

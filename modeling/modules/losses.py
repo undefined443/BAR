@@ -10,8 +10,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
-from .perceptual_loss import PerceptualLoss
+
 from .discriminator_dino import DinoDisc
+from .perceptual_loss import PerceptualLoss
 
 
 # Gram Loss

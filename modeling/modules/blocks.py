@@ -1,10 +1,11 @@
+import copy
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import copy
-from timm.layers import Mlp
 from einops import rearrange
 from einops.layers.torch import Rearrange
+from timm.layers import Mlp
 from transformers import AutoModel
 
 

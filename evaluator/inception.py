@@ -17,9 +17,7 @@ https://github.com/mseitzer/pytorch-fid/blob/master/src/pytorch_fid/inception.py
 # limitations under the License.
 import torch
 import torch.nn.functional as F
-
 from torch_fidelity.feature_extractor_base import FeatureExtractorBase
-from torch_fidelity.helpers import vassert
 from torch_fidelity.feature_extractor_inceptionv3 import (
     BasicConv2d,
     InceptionA,
@@ -29,6 +27,7 @@ from torch_fidelity.feature_extractor_inceptionv3 import (
     InceptionE_1,
     InceptionE_2,
 )
+from torch_fidelity.helpers import vassert
 from torch_fidelity.interpolate_compat_tensorflow import (
     interpolate_bilinear_2d_like_tensorflow1x,
 )

@@ -1,10 +1,12 @@
 import math
+
 import torch
 import torch.nn as nn
-from modeling.modules import BaseModel
-from modeling.modules.blocks import init_weights, Block, RMSNorm
-from modeling.modules.rope import RotaryEmbeddingFast
 from einops import rearrange
+
+from modeling.modules import BaseModel
+from modeling.modules.blocks import Block, RMSNorm, init_weights
+from modeling.modules.rope import RotaryEmbeddingFast
 
 
 def build_causal_mask(seq_length):

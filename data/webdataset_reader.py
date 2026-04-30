@@ -7,12 +7,13 @@ Ref:
 
 import math
 import random
-from typing import List, Union, Text, Tuple
-import webdataset as wds
-import torch
-from torch.utils.data import default_collate
-from torchvision import transforms, datasets
+from typing import List, Text, Tuple, Union
+
 import numpy as np
+import torch
+import webdataset as wds
+from torch.utils.data import default_collate
+from torchvision import datasets, transforms
 
 
 class ImageTransform:

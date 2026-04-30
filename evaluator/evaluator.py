@@ -1,15 +1,16 @@
 """This file contains a class to evalute the reconstruction results."""
 
 import warnings
+from typing import Mapping, Optional, Sequence, Text
 
-from typing import Sequence, Optional, Mapping, Text
 import numpy as np
-from scipy import linalg
 import torch
 import torch.nn.functional as F
+from scipy import linalg
+
+from modeling.modules import LPIPS
 
 from .inception import get_inception_model
-from modeling.modules import LPIPS
 
 
 def uniform(kernel_size: int) -> torch.Tensor:

@@ -10,7 +10,6 @@ from collections import namedtuple
 
 import torch
 import torch.nn as nn
-
 from torchvision import models
 
 _LPIPS_MEAN = [-0.030, -0.088, -0.188]

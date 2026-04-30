@@ -1,10 +1,12 @@
+import math
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from modeling.modules.blocks import modulate, FinalLayer, SwiGLUFFN, RMSNorm
-import math
-import numpy as np
+
+from modeling.modules.blocks import FinalLayer, RMSNorm, SwiGLUFFN, modulate
 
 try:
     from omegaconf import ListConfig

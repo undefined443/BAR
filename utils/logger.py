@@ -1,12 +1,12 @@
 """This files contains util functions supporting logging to terminal and files."""
 
 import functools
-import sys
-from accelerate.logging import MultiProcessAdapter
 import logging
-from termcolor import colored
+import sys
 
+from accelerate.logging import MultiProcessAdapter
 from iopath.common.file_io import PathManager as PathManagerClass
+from termcolor import colored
 
 __all__ = ["setup_logger", "PathManager"]
 

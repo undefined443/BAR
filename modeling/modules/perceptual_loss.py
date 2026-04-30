@@ -1,8 +1,8 @@
 """This file contains perceptual loss module using LPIPS or ConvNeXt-S."""
 
 import torch
-
 from torchvision import models
+
 from .lpips import LPIPS
 
 _IMAGENET_MEAN = [0.485, 0.456, 0.406]

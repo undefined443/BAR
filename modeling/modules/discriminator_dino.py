@@ -1,19 +1,20 @@
 # ref: https://github.com/CVMI-Lab/Hita/blob/e67a55ea80101f5c1855d4fea39553a248ee1c16/hita/tokenizer/tokenizer_image/discriminator_dino.py
-import numpy as np
-import torch.nn as nn
-from typing import List, Tuple
-import torch.nn.functional as F
 import math
 import random
+from typing import List, Tuple
+
+import numpy as np
 import torch
-from torchvision.transforms import RandomCrop
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.utils.spectral_norm import SpectralNorm
+from torchvision.transforms import RandomCrop
 
 # import dist
 
 try:
-    from flash_attn.ops.layer_norm import dropout_add_layer_norm
     from flash_attn.ops.fused_dense import fused_mlp_func
+    from flash_attn.ops.layer_norm import dropout_add_layer_norm
 except Exception:
     dropout_add_layer_norm = fused_mlp_func = None
 

@@ -5,7 +5,7 @@ Ref:
 """
 
 import os
-from typing import Union, Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Union
 
 import torch
 

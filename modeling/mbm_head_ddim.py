@@ -1,8 +1,10 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from modeling.modules.blocks import modulate, FinalLayer, SwiGLUFFN, RMSNorm
-import math
+
+from modeling.modules.blocks import FinalLayer, RMSNorm, SwiGLUFFN, modulate
 
 
 # This block is used to build adaMLP

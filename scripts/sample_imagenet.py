@@ -3,17 +3,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from omegaconf import OmegaConf
-from types import SimpleNamespace
-import torch
-import torch.distributed as dist
 import os
 import time
+from types import SimpleNamespace
+
+import torch
+import torch.distributed as dist
+from omegaconf import OmegaConf
 from tqdm import tqdm
+
+from modeling.generator import BAR
+from utils.eval_utils import compute_metrics, load_refs_from_wds
 from utils.logger import setup_logger
 from utils.train_utils import create_dataloader, get_pretrained_tokenizer
-from utils.eval_utils import load_refs_from_wds, compute_metrics
-from modeling.generator import BAR
 
 
 def get_config_cli():

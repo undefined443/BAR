@@ -2,8 +2,8 @@
 
 import torch
 import torch.nn as nn
-from transformers import AutoModel, CLIPTokenizer, SiglipImageProcessor
 from omegaconf import OmegaConf
+from transformers import AutoModel, CLIPTokenizer, SiglipImageProcessor
 
 from .modules import SigLIP2Decoder
 
