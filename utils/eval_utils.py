@@ -14,7 +14,7 @@ def load_refs_from_wds(eval_shards):
     dataset = (
         wds.WebDataset(eval_shards, shardshuffle=False, nodesplitter=None)
         .decode()
-        .map(lambda sample: {**sample, "cocoid": sample["caption"]["cocoid"]})
+        .map(lambda sample: {**sample, "cocoid": sample["json"]["cocoid"]})
     )
     for sample in dataset:
         image_id = int(sample["cocoid"])
