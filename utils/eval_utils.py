@@ -11,9 +11,11 @@ def load_refs_from_wds(eval_shards):
         in the format expected by pycocoevalcap scorers.
     """
     refs = {}
-    dataset = wds.WebDataset(
-        eval_shards, shardshuffle=False, nodesplitter=None
-    ).decode()
+    dataset = (
+        wds.WebDataset(eval_shards, shardshuffle=False, nodesplitter=None)
+        .decode()
+        .map(lambda sample: {**sample, "cocoid": sample["caption"]["cocoid"]})
+    )
     for sample in dataset:
         image_id = int(sample["cocoid"])
         raw = sample["json"]
