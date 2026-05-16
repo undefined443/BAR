@@ -255,12 +255,13 @@ def create_lr_scheduler(
 ):
     """Creates learning rate scheduler for BAR_FSQ tokenizer and discriminator."""
     logger.info("Creating lr_schedulers.")
+    grad_accum = config.training.gradient_accumulation_steps
     lr_scheduler = get_scheduler(
         config.lr_scheduler.scheduler,
         optimizer=optimizer,
-        num_training_steps=config.training.max_train_steps * accelerator.num_processes,
+        num_training_steps=config.training.max_train_steps * accelerator.num_processes * grad_accum,
         num_warmup_steps=config.lr_scheduler.params.warmup_steps
-        * accelerator.num_processes,
+        * accelerator.num_processes * grad_accum,
         base_lr=config.lr_scheduler.params.learning_rate,
         end_lr=config.lr_scheduler.params.end_lr,
     )
@@ -271,9 +272,9 @@ def create_lr_scheduler(
             num_training_steps=(
                 config.training.max_train_steps - config.losses.discriminator_start
             )
-            * accelerator.num_processes,
+            * accelerator.num_processes * grad_accum,
             num_warmup_steps=config.lr_scheduler.params.warmup_steps
-            * accelerator.num_processes,
+            * accelerator.num_processes * grad_accum,
             base_lr=config.lr_scheduler.params.learning_rate,
             end_lr=config.lr_scheduler.params.end_lr,
         )
