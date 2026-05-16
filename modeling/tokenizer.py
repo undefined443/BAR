@@ -130,11 +130,12 @@ class BAR_FSQ(nn.Module):
         return self.encode(input)
 
     @staticmethod
-    def _character_to_image(char: str) -> Image.Image:
+    def _character_to_image(char: str, img_size: int = 14) -> Image.Image:
         """Convert a character to a PIL Image.
 
         Args:
             char: A single character string
+            img_size: Size of the output image in pixels (default: 14)
 
         Raises:
             AssertionError: If input is not a string or not a single character
@@ -152,7 +153,6 @@ class BAR_FSQ(nn.Module):
                 "Terminus font not found. Install it with: apt install fonts-terminus"
             )
 
-        img_size = 14
         img = Image.new("1", (img_size, img_size), color=1)
         draw = ImageDraw.Draw(img)
         font = ImageFont.truetype(terminus_font, size=12)
@@ -161,16 +161,28 @@ class BAR_FSQ(nn.Module):
         return img
 
     @staticmethod
-    def _word_to_image(word: str) -> Image.Image:
+    def _word_to_image(
+        word: str, max_length: int | None = None, img_size: int = 14
+    ) -> Image.Image:
         """Convert a word string to an image with each character rendered.
 
         Args:
             word: A word string
+            max_length: If set, pad or truncate word to this length (pad with spaces)
+            img_size: Size of each character image in pixels (default: 14)
 
         Returns:
             PIL Image with all characters concatenated horizontally
         """
-        char_images = [BAR_FSQ._character_to_image(char) for char in word]
+        if max_length is not None:
+            if len(word) < max_length:
+                word = word.ljust(max_length)
+            else:
+                word = word[:max_length]
+
+        char_images = [
+            BAR_FSQ._character_to_image(char, img_size=img_size) for char in word
+        ]
 
         char_width = char_images[0].width
         char_height = char_images[0].height
@@ -182,16 +194,23 @@ class BAR_FSQ(nn.Module):
         return img
 
     @staticmethod
-    def _tokens_to_image(tokens: list[str]) -> Image.Image:
+    def _tokens_to_image(
+        tokens: list[str], max_length: int | None = None, img_size: int = 14
+    ) -> Image.Image:
         """Convert a list of tokens to a concatenated image.
 
         Args:
             tokens: List of token strings
+            max_length: If set, pad/truncate each token to this length
+            img_size: Size of each character image in pixels (default: 14)
 
         Returns:
             PIL Image with all tokens concatenated horizontally
         """
-        word_images = [BAR_FSQ._word_to_image(token) for token in tokens]
+        word_images = [
+            BAR_FSQ._word_to_image(token, max_length=max_length, img_size=img_size)
+            for token in tokens
+        ]
 
         total_width = sum(img.width for img in word_images)
         height = word_images[0].height
@@ -213,9 +232,16 @@ class BAR_FSQ(nn.Module):
         Returns:
             List of PIL Images, one per input text
         """
+        max_token_length = self.config.model.vq_model.get("max_token_length")
+        char_image_size = self.config.model.vq_model.get("char_image_size", 14)
         tokens_list = [
             self.tokenizer.tokenize(text)[: self.text_seq_len] for text in texts
         ]
-        img_list = [BAR_FSQ._tokens_to_image(tokens) for tokens in tokens_list]
+        img_list = [
+            BAR_FSQ._tokens_to_image(
+                tokens, max_length=max_token_length, img_size=char_image_size
+            )
+            for tokens in tokens_list
+        ]
 
         return img_list

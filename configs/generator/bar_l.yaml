@@ -17,6 +17,8 @@ model:
     token_size: 16
     vit_dec_patch_size: 16
     vision_hidden_size: 1152  # SigLIP2 so400m last_hidden_state dim
+    max_token_length: 15  # Pad/truncate token strings to this length (2-sigma)
+    char_image_size: 14  # Size of character image (pixels)
   generator:
     hidden_size: 1280
     num_hidden_layers: 32
