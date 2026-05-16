@@ -6,9 +6,31 @@ import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 from PIL import Image, ImageDraw, ImageFont
+from torchvision.transforms.functional import pil_to_tensor
 from transformers import AutoModel, CLIPTokenizer, SiglipImageProcessor
 
 from .modules import SigLIP2Decoder
+
+
+class TokenImageCNNEncoder(nn.Module):
+    """CNN encoder for token image patches (14×14*max_token_length)."""
+
+    def __init__(self, embedding_dim: int):
+        super().__init__()
+        self.embedding_dim = embedding_dim
+
+        self.conv1 = nn.Conv2d(1, 256, kernel_size=(14, 210), stride=210, padding=0)
+        self.act1 = nn.SiLU()
+        self.fc1 = nn.Linear(256, 512)
+        self.act2 = nn.SiLU()
+        self.fc2 = nn.Linear(512, embedding_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.act1(self.conv1(x))  # (B, 256, 1, 1)
+        x = x.view(x.shape[0], -1)  # (B, 256)
+        x = self.act2(self.fc1(x))  # (B, 512)
+        x = self.fc2(x)  # (B, embedding_dim)
+        return x
 
 
 class BAR_FSQ(nn.Module):
@@ -22,25 +44,28 @@ class BAR_FSQ(nn.Module):
         super().__init__()
         self.config = config
 
-        self.decoder = SigLIP2Decoder(config)
+        self._decoder = SigLIP2Decoder(config)
 
-        self.tokenizer = CLIPTokenizer.from_pretrained(config.model.vq_model.tokenizer)
-        self.text_seq_len = config.model.generator.text_seq_len
+        self._tokenizer = CLIPTokenizer.from_pretrained(config.model.vq_model.tokenizer)
+        self._text_seq_len = config.model.generator.text_seq_len
 
         full_model = AutoModel.from_pretrained(config.model.vq_model.encoder)
-        self.encoder = full_model.vision_model
+        self._encoder = full_model.vision_model
 
         # Freeze the SigLIP2 model
-        self.encoder.eval()
-        self.encoder.requires_grad_(False)
-        self.encoder.head.requires_grad_(False)
+        self._encoder.eval()
+        self._encoder.requires_grad_(False)
+        self._encoder.head.requires_grad_(False)
 
         del full_model
 
         crop_size = config.dataset.preprocessing.crop_size
-        self.image_processor = SiglipImageProcessor(
+        self._image_processor = SiglipImageProcessor(
             size={"height": crop_size, "width": crop_size}, do_resize=False
         )
+
+        embedding_dim = config.model.vq_model.vision_hidden_size
+        self._token_image_encoder = TokenImageCNNEncoder(embedding_dim=embedding_dim)
 
     def encode(self, texts, images):
         """Encode texts to binary bits and images to embeddings.
@@ -58,10 +83,10 @@ class BAR_FSQ(nn.Module):
             texts = [texts]
 
         with torch.no_grad():
-            inputs = self.tokenizer(
+            inputs = self._tokenizer(
                 texts,
                 padding="max_length",
-                max_length=self.text_seq_len,
+                max_length=self._text_seq_len,
                 return_tensors="pt",
                 truncation=True,
             )
@@ -70,10 +95,10 @@ class BAR_FSQ(nn.Module):
 
             # Rescale from [-1, 1] to [0, 1] before passing to SiglipImageProcessor
             images_rescaled = (images * 0.5 + 0.5).clamp(0, 1)
-            processed_images = self.image_processor(
+            processed_images = self._image_processor(
                 images=images_rescaled, return_tensors="pt", do_rescale=False
             )["pixel_values"].to(images.device)
-            outputs = self.encoder(pixel_values=processed_images)
+            outputs = self._encoder(pixel_values=processed_images)
             image_embeddings = outputs.last_hidden_state
 
         return token_bits, image_embeddings
@@ -88,9 +113,9 @@ class BAR_FSQ(nn.Module):
             texts: Decoded text strings.
         """
         # Convert bit representation back to token IDs for tokenizer decoding
-        token_bits = token_bits.view(token_bits.shape[0], self.text_seq_len, -1)
+        token_bits = token_bits.view(token_bits.shape[0], self._text_seq_len, -1)
         token_ids = self._bits_to_token_ids(token_bits)
-        texts = self.tokenizer.batch_decode(token_ids, skip_special_tokens=True)
+        texts = self._tokenizer.batch_decode(token_ids, skip_special_tokens=True)
         return texts
 
     def _token_ids_to_bits(self, token_ids, token_size=16):
@@ -223,7 +248,7 @@ class BAR_FSQ(nn.Module):
 
         return img
 
-    def texts_to_image(self, texts: list[str]) -> list[Image.Image]:
+    def _texts_to_images(self, texts: list[str]) -> list[Image.Image]:
         """Convert text strings to image representations via tokenization.
 
         Args:
@@ -235,7 +260,7 @@ class BAR_FSQ(nn.Module):
         max_token_length = self.config.model.vq_model.get("max_token_length")
         char_image_size = self.config.model.vq_model.get("char_image_size", 14)
         tokens_list = [
-            self.tokenizer.tokenize(text)[: self.text_seq_len] for text in texts
+            self._tokenizer.tokenize(text)[: self._text_seq_len] for text in texts
         ]
         img_list = [
             BAR_FSQ._tokens_to_image(
@@ -245,3 +270,68 @@ class BAR_FSQ(nn.Module):
         ]
 
         return img_list
+
+    def _images_to_embedding(
+        self,
+        images: list[Image.Image],
+        char_image_size: int = 14,
+        max_token_length: int = 15,
+    ) -> torch.Tensor:
+        """Convert token images to embeddings using CNN encoder.
+
+        Uses a scanning window of size (char_image_size, char_image_size * max_token_length)
+        with stride equal to window width for non-overlapping horizontal patches.
+
+        Args:
+            images: List of PIL Images from texts_to_image
+            char_image_size: Size of character image in pixels
+            max_token_length: Maximum token length (window width = char_image_size * max_token_length)
+
+        Returns:
+            Embeddings tensor of shape (B, num_patches, embedding_dim)
+        """
+        # Convert PIL images to tensors
+        image_tensors = []
+        for img in images:
+            img_tensor = pil_to_tensor(img).float() / 255.0
+            image_tensors.append(img_tensor.unsqueeze(0))  # (1, H, W)
+
+        # Stack images (B, 1, H, W)
+        batch_images = torch.stack(image_tensors)
+
+        # Get dimensions
+        B, C, H, W = batch_images.shape
+        scan_h = char_image_size
+        scan_w = char_image_size * max_token_length
+        stride = scan_w  # Non-overlapping horizontal windows
+
+        # Extract patches using unfold
+        patches = batch_images.unfold(2, scan_h, stride).unfold(3, scan_w, stride)
+        # patches shape: (B, C, num_h, num_w, scan_h, scan_w)
+
+        B, C, num_h, num_w, _, _ = patches.shape
+        # Reshape to (B*num_h*num_w, C, scan_h, scan_w)
+        patches = patches.contiguous().view(B * num_h * num_w, C, scan_h, scan_w)
+
+        # CNN encoder
+        with torch.no_grad():
+            embeddings = self._token_image_encoder(patches)
+
+        # Reshape back to (B, num_patches, embedding_dim)
+        embedding_dim = embeddings.shape[-1]
+        embeddings = embeddings.view(B, num_h * num_w, embedding_dim)
+
+        return embeddings
+
+    def encode_as_images(self, texts: list[str]) -> torch.Tensor:
+        """Encode text strings as images to obtain embeddings.
+
+        Args:
+            texts: List of text strings to encode
+
+        Returns:
+            Embeddings tensor of shape (B, text_seq_len, embedding_dim)
+        """
+        images = self._texts_to_images(texts)
+        embeddings = self._images_to_embedding(images)
+        return embeddings
