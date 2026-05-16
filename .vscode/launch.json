@@ -19,7 +19,7 @@
         "training.num_generated_captions=5000",
         "training.log_every_n_steps=1",
         "training.compile_model=false",
-        "training.enable_wandb=false",
+        "training.enable_wandb=true",
         "model.generator.mbm_head.use_ddim=true"
       ],
       "envFile": "${workspaceFolder}/.env"
@@ -72,6 +72,14 @@
         "MASTER_PORT": "0"
       },
       "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "current file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
     }
   ],
   "inputs": [
