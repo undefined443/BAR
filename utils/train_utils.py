@@ -845,7 +845,7 @@ def save_checkpoint(
 
         if wandb_run_id is not None and wandb.run is not None:
             artifact = wandb.Artifact(
-                name=f"checkpoint-{wandb.run.id}",
+                name=f"{wandb.run.name}-{wandb.run.id}",
                 type="model",
                 metadata={"global_step": global_step},
             )
