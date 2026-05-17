@@ -111,7 +111,10 @@ class BAR(BaseModel):
         self.norm = norm_layer(embed_dim)
 
         # FSQ uses token_size
-        self.base_vq_split_channel = config.model.vq_model.token_size
+        self.base_vq_split_channel = (
+            config.model.vq_model.char_image_size**2
+            * config.model.vq_model.max_token_length
+        )
         self.vq_split_channel = self.base_vq_split_channel * self.patch_size
 
         # MaskBitModeling head for per-token prediction

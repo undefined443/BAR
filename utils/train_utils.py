@@ -9,7 +9,6 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torchvision.transforms.functional as TVF
-from accelerate.utils import gather_object
 from omegaconf import OmegaConf
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
@@ -20,7 +19,6 @@ from evaluator import VQGANEvaluator
 from modeling.generator import BAR
 from modeling.modules import EMAModel
 from modeling.tokenizer import BAR_FSQ
-from utils.eval_utils import compute_metrics, load_refs_from_wds
 from utils.lr_schedulers import get_scheduler
 
 
@@ -624,27 +622,26 @@ def _evaluate_and_log_captions(
     wandb_metric_prefix,
     wandb_image_label,
 ):
-    if config.training.num_generated_captions == 5000:
-        all_captions = gather_object(captions)
-        if accelerator.is_main_process:
-            preds = {item["image_id"]: [item["caption"]] for item in all_captions}
-            refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
-            metrics = compute_metrics(preds, refs)
-            logger.info(
-                "Metrics: " + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
-            )
-            if config.training.enable_wandb:
-                accelerator.get_tracker("wandb").log(
-                    {f"{wandb_metric_prefix}/{k}": v for k, v in metrics.items()},
-                    step=global_step,
-                )
+    # if config.training.num_generated_captions == 5000:
+    #     all_captions = gather_object(captions)
+    #     if accelerator.is_main_process:
+    #         preds = {item["image_id"]: [item["caption"]] for item in all_captions}
+    #         refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
+    #         # metrics = compute_metrics(preds, refs)
+    #         logger.info(
+    #             "Metrics: " + ", ".join([f"{k}={v:.4f}" for k, v in metrics.items()])
+    #         )
+    #         if config.training.enable_wandb:
+    #             accelerator.get_tracker("wandb").log(
+    #                 {f"{wandb_metric_prefix}/{k}": v for k, v in metrics.items()},
+    #                 step=global_step,
+    #             )
 
     if config.training.enable_wandb:
         accelerator.get_tracker("wandb").log(
             {
                 wandb_image_label: [
-                    wandb.Image(item["image"], caption=item["caption"])
-                    for item in captions[:15]
+                    wandb.Image(item["caption"]) for item in captions[:15]
                 ]
             },
             step=global_step,
