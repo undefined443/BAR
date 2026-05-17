@@ -127,7 +127,7 @@ class BAR_FSQ(nn.Module):
         terminus_font = Path("/usr/share/fonts/opentype/terminus/terminus-normal.otb")
         if not terminus_font.exists():
             raise FileNotFoundError(
-                "Terminus font not found. Install it with: apt install fonts-terminus"
+                "Terminus font not found. Install it with: apt install fonts-terminus-otb"
             )
 
         img = Image.new("1", (img_size, img_size), color=1)
