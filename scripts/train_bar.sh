@@ -13,5 +13,5 @@ uv run accelerate launch \
     dataset.params.train_shards_path_or_url="$TRAIN_SHARDS_DIR/train-{00000..00113}.tar" \
     dataset.params.eval_shards_path_or_url="$EVAL_SHARDS_DIR/test-{00000..00004}.tar" \
     training.num_generated_captions=5000 \
-    training.gradient_accumulation_steps=1 \
-    training.per_gpu_batch_size=$((2048 / 8))
+    training.gradient_accumulation_steps=2 \
+    training.per_gpu_batch_size=$((2048 / 16))
