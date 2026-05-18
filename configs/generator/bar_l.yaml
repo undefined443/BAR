@@ -1,5 +1,5 @@
 experiment:
-  project: bar-caption
+  project: bar-caption-image
   name: bar_l
   output_dir: bar_l
   max_train_examples: 1281167
