@@ -425,8 +425,9 @@ def generator_train_one_epoch(
     """One epoch training."""
     batch_time_meter = AverageMeter()
     data_time_meter = AverageMeter()
+    tokenizer_time_meter = AverageMeter()
     loss_average_meter = AverageMeter()
-    end = time.time()
+    end = time.perf_counter()
     model.train()
 
     def get_rar_random_ratio(config, cur_step):
@@ -465,16 +466,18 @@ def generator_train_one_epoch(
             )
             # Encode captions on the flight.
             with torch.no_grad():
+                _t_enc = time.perf_counter()
                 if tokenizer_encode_fn is not None:
                     input_tokens, conditions = tokenizer_encode_fn(captions, images)
                 else:
                     # Fallback: call tokenizer.encode directly
                     input_tokens, conditions = tokenizer.encode(captions, images)
+                tokenizer_time_meter.update(time.perf_counter() - _t_enc)
                 input_tokens = input_tokens.reshape(len(captions), -1)
         else:
             raise NotImplementedError
 
-        data_time_meter.update(time.time() - end)
+        data_time_meter.update(time.perf_counter() - end)
 
         unwrap_model = accelerator.unwrap_model(model)
         # Compute random_ratio outside compiled region to avoid recompilation
@@ -523,8 +526,8 @@ def generator_train_one_epoch(
         if accelerator.sync_gradients:
             if config.training.use_ema:
                 ema_model.step(model.parameters())
-            batch_time_meter.update(time.time() - end)
-            end = time.time()
+            batch_time_meter.update(time.perf_counter() - end)
+            end = time.perf_counter()
 
             if (global_step + 1) % config.experiment.log_every == 0:
                 samples_per_second_per_gpu = (
@@ -545,6 +548,7 @@ def generator_train_one_epoch(
                     "time/samples_per_sec_per_gpu": samples_per_second_per_gpu,
                     "time/data_time": data_time_meter.val,
                     "time/batch_time": batch_time_meter.val,
+                    "time/tokenizer_encode_time": tokenizer_time_meter.avg,
                     "train/avg_mlm_loss": loss_average_meter.avg,
                 }
                 logs.update(gen_logs)
@@ -554,6 +558,7 @@ def generator_train_one_epoch(
                 # Reset batch / data time meters per log window.
                 batch_time_meter.reset()
                 data_time_meter.reset()
+                tokenizer_time_meter.reset()
                 loss_average_meter.reset()
 
             # Save model checkpoint.
