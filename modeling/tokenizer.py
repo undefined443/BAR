@@ -69,7 +69,7 @@ class BAR_FSQ(nn.Module):
             token_ids = inputs["input_ids"].to(images.device)
             text_images = [self._token_ids_to_images(tid.tolist()) for tid in token_ids]
             images_tensor = [
-                pil_to_tensor(img).to(images.device).view(self._text_seq_len, -1)
+                pil_to_tensor(img).long().to(images.device).view(self._text_seq_len, -1)
                 for img in text_images
             ]
             token_bits = torch.stack(images_tensor)
