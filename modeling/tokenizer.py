@@ -72,7 +72,12 @@ class BAR_FSQ(nn.Module):
             )
             # Look up pre-rendered bitmaps: (B, text_seq_len) -> (B, text_seq_len * D)
             token_ids = inputs["input_ids"]
-            token_bits = self._token_bitmap_lut[token_ids].to(images.device).long().reshape(len(token_ids), -1)
+            token_bits = (
+                self._token_bitmap_lut[token_ids]
+                .to(images.device)
+                .long()
+                .reshape(len(token_ids), -1)
+            )
 
             # Rescale from [-1, 1] to [0, 1] before passing to SiglipImageProcessor
             images_rescaled = (images * 0.5 + 0.5).clamp(0, 1)
@@ -100,7 +105,9 @@ class BAR_FSQ(nn.Module):
         # Reshape from (B, L*D) to (B, 1, char_image_size, W)
         tensor_reshaped = token_bits.view(B, 1, -1, char_image_size * max_token_length)
 
-        images = [to_pil_image((t * 255).cpu().byte()).convert("1") for t in tensor_reshaped]
+        images = [
+            to_pil_image((t * 255).cpu().byte()).convert("1") for t in tensor_reshaped
+        ]
         return images
 
     def _build_token_bitmap_lut(self) -> torch.Tensor:
