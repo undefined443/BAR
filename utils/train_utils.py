@@ -19,6 +19,7 @@ from evaluator import VQGANEvaluator
 from modeling.generator import BAR
 from modeling.modules import EMAModel
 from modeling.tokenizer import BAR_FSQ
+from utils.eval_utils import load_refs_from_wds
 from utils.lr_schedulers import get_scheduler
 
 
@@ -637,11 +638,16 @@ def _evaluate_and_log_captions(
     #                 step=global_step,
     #             )
 
-    if config.training.enable_wandb:
+    if config.training.enable_wandb and accelerator.is_main_process:
+        refs = load_refs_from_wds(config.dataset.params.eval_shards_path_or_url)
+
         accelerator.get_tracker("wandb").log(
             {
                 wandb_image_label: [
-                    wandb.Image(item["caption"]) for item in captions[:15]
+                    wandb.Image(
+                        item["caption"], caption=refs.get(item["image_id"], [""])[0]
+                    )
+                    for item in captions[:15]
                 ]
             },
             step=global_step,
